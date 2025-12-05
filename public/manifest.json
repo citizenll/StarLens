@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Star Agent",
+  "version": "1.0.0",
+  "description": "AI-powered GitHub Star Manager",
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "vite.svg",
+      "48": "vite.svg",
+      "128": "vite.svg"
+    }
+  },
+  "icons": {
+    "16": "vite.svg",
+    "48": "vite.svg",
+    "128": "vite.svg"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.github.com/*",
+    "https://api.openai.com/*"
+  ]
+}

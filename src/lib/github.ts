@@ -158,6 +158,20 @@ export class GitHubService {
       return null;
     }
   }
+
+  async fetchReadmeCached(repo: Repository, force = false) {
+    if (!force && repo.readme_content) {
+      return repo.readme_content;
+    }
+    const content = await this.fetchReadme(repo.owner.login, repo.name);
+    if (content !== null && content !== undefined) {
+      await db.repositories.update(repo.id, {
+        readme_content: content,
+        readme_fetched_at: new Date().toISOString(),
+      });
+    }
+    return content || '';
+  }
 }
 
 export const githubService = new GitHubService();

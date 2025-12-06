@@ -52,6 +52,56 @@ Output format (JSON):
       return null;
     }
   }
+
+  async generateBatchTagsAndSummary(
+    repos: Array<{ id: number | string; name: string; description: string; readme: string }>
+  ) {
+    if (!this.openai) throw new Error('AI client not initialized');
+    if (repos.length === 0) return [];
+
+    const prompt = `
+你是资深开发助手。请为每个仓库生成：
+- summary: 最多2句中文摘要
+- tags: 3-5个技术标签（小写短语）
+
+请输出 JSON 数组，与输入顺序一致。
+
+输入:
+${repos
+  .map(
+    (r, idx) => `#${idx + 1} (${r.id})
+Name: ${r.name}
+Description: ${r.description}
+Readme: ${r.readme.slice(0, 1200)}`
+  )
+  .join('\n\n')}
+
+输出格式：
+[
+  {"id": "<id>", "summary": "...", "tags": ["...", "..."]},
+  ...
+]
+    `.trim();
+
+    const completion = await this.openai.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'deepseek-chat',
+      response_format: { type: 'json_object' }
+    });
+
+    const content = completion.choices[0].message.content;
+    if (!content) return [];
+
+    try {
+      const parsed = JSON.parse(content) as { items?: Array<{ id: string | number; summary: string; tags: string[] }> } | any[];
+      // Support both wrapped {"items":[...]} and direct array
+      const arr = Array.isArray(parsed) ? parsed : parsed.items || [];
+      return arr;
+    } catch (e) {
+      console.error('Failed to parse AI batch response', e);
+      return [];
+    }
+  }
   
   async getEmbedding(text: string) {
       // Local, lightweight embedding to avoid network/CORS issues.

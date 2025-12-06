@@ -22,7 +22,7 @@ export default function Layout() {
           </div>
         </div>
         
-        <div className="flex-1 overflow-auto py-4">
+        <div className="flex-1 overflow-hidden py-4">
           <nav className="grid gap-1 px-2">
             <div className="px-4 py-2">
               <h2 className="mb-2 px-2 text-[11px] font-semibold tracking-[0.18em] text-emerald-400/70 uppercase">
@@ -43,7 +43,7 @@ export default function Layout() {
                   {/* @ts-ignore */}
                   <Button
                     variant={location.pathname === '/settings' ? 'secondary' : 'ghost'}
-                    className="w-full justify-start border border-emerald-600/40 bg-[#0b1a11] hover:bg-[#0f2617] text-emerald-100"
+                    className="w-full justify-start border border-emerald-600/40 bg-[#0b1a11] hover:bg-[#0f2617] text-emerald-100 mt-1"
                   >
                     <Settings className="mr-2 h-4 w-4" />
                     Settings

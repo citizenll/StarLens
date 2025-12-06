@@ -30,6 +30,7 @@ export interface Repository {
   };
   // Custom fields
   readme_content?: string;
+  readme_fetched_at?: string;
   ai_summary?: string;
   ai_tags?: string[];
   embedding?: number[];

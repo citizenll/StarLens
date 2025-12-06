@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { toast } from 'sonner';
-import { RefreshCw, Search, Star, Sparkles, SlidersHorizontal, Clock3, ArrowUpWideNarrow } from 'lucide-react';
+import { RefreshCw, Search, Star, Sparkles, SlidersHorizontal, Clock3, ArrowUpWideNarrow, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,6 +12,10 @@ import { aiService } from '@/lib/ai';
 import type { Repository } from '@/types';
 
 const ITEMS_PER_PAGE = 20;
+const README_CONCURRENCY = 3;
+const INDEX_CONCURRENCY = 3;
+const AI_BATCH_SIZE = 4;
+const MAX_BATCH_SIZE_SINGLE = 1;
 
 export default function Dashboard() {
   const [allRepos, setAllRepos] = useState<Repository[]>([]);
@@ -25,6 +29,7 @@ export default function Dashboard() {
   const [sortBy, setSortBy] = useState<'recent' | 'stars' | 'indexed'>('recent');
   const [syncing, setSyncing] = useState(false);
   const [indexing, setIndexing] = useState(false);
+  const [reindexingId, setReindexingId] = useState<number | null>(null);
   const [indexingProgress, setIndexingProgress] = useState({ current: 0, total: 0 });
   const [stats, setStats] = useState({ total: 0, indexed: 0 });
 
@@ -121,10 +126,113 @@ export default function Dashboard() {
     }
   };
 
+  const runWithPool = async <T, R>(
+    items: T[],
+    limit: number,
+    worker: (item: T, idx: number) => Promise<R>
+  ) => {
+    const results: R[] = [];
+    let i = 0;
+    const exec = async () => {
+      while (i < items.length) {
+        const idx = i++;
+        try {
+          results[idx] = await worker(items[idx], idx);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    };
+    const runners = Array.from({ length: Math.min(limit, items.length) }, () => exec());
+    await Promise.all(runners);
+    return results;
+  };
+
+  const indexRepositories = async (repos: Repository[], forceReadme = false) => {
+    if (repos.length === 0) return { success: 0, total: 0 };
+
+    setIndexingProgress({ current: 0, total: repos.length });
+    let successCount = 0;
+    let processed = 0;
+
+    // 1) fetch readmes (cached unless force)
+    const readmeMap = new Map<number, string>();
+    await runWithPool(repos, README_CONCURRENCY, async (repo) => {
+      if (!forceReadme && repo.readme_content) {
+        readmeMap.set(repo.id, repo.readme_content);
+        return;
+      }
+      const readme = await githubService.fetchReadmeCached(repo, forceReadme);
+      readmeMap.set(repo.id, readme || '');
+    });
+
+    // 2) batch AI calls
+    const aiMap = new Map<number, { summary: string; tags: string[] }>();
+    for (let i = 0; i < repos.length; i += AI_BATCH_SIZE) {
+      const batchRepos = repos.slice(i, i + AI_BATCH_SIZE);
+      const batchPayload = batchRepos.map((repo) => ({
+        id: repo.id,
+        name: repo.full_name,
+        description: repo.description || '',
+        readme: readmeMap.get(repo.id) || ''
+      }));
+      try {
+        const batchResults = await aiService.generateBatchTagsAndSummary(batchPayload);
+        batchResults.forEach((item: any) => {
+          if (item && item.id) {
+            aiMap.set(Number(item.id), { summary: item.summary, tags: item.tags });
+          }
+        });
+      } catch (err) {
+        console.error('AI batch failed, fallback single calls', err);
+        // fallback single calls for this batch
+        for (const repo of batchRepos) {
+          try {
+            const single = await aiService.generateTagsAndSummary(
+              repo.full_name,
+              repo.description || '',
+              readmeMap.get(repo.id) || ''
+            );
+            if (single) aiMap.set(repo.id, { summary: single.summary, tags: single.tags });
+          } catch (e) {
+            console.error(`AI single failed for ${repo.full_name}`, e);
+          }
+        }
+      }
+    }
+
+    // 3) index + persist
+    await runWithPool(repos, INDEX_CONCURRENCY, async (repo) => {
+      try {
+        const aiResult = aiMap.get(repo.id);
+        if (aiResult) {
+          await db.repositories.update(repo.id, {
+            ai_summary: aiResult.summary,
+            ai_tags: aiResult.tags,
+            readme_content: readmeMap.get(repo.id) || undefined
+          });
+          repo.ai_summary = aiResult.summary;
+          repo.ai_tags = aiResult.tags;
+          repo.readme_content = readmeMap.get(repo.id) || undefined;
+        }
+
+        await vectorService.indexRepo(repo);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to index ${repo.full_name}`, err);
+      } finally {
+        processed++;
+        setIndexingProgress({ current: processed, total: repos.length });
+      }
+    });
+
+    await vectorService.save();
+    return { success: successCount, total: repos.length };
+  };
+
   const handleIndex = async () => {
     setIndexing(true);
     try {
-      // Find repos without embedding or ai_tags
       const unindexed = await db.repositories
         .filter(r => !r.embedding || !r.ai_tags)
         .toArray();
@@ -134,54 +242,9 @@ export default function Dashboard() {
         return;
       }
 
-      setIndexingProgress({ current: 0, total: unindexed.length });
       toast.info(`Indexing ${unindexed.length} repositories...`);
-
-      let successCount = 0;
-
-      for (let i = 0; i < unindexed.length; i++) {
-        const repo = unindexed[i];
-        setIndexingProgress({ current: i + 1, total: unindexed.length });
-
-        try {
-            // 1. Generate AI tags/summary if missing
-            if (!repo.ai_tags || !repo.ai_summary) {
-                const readme = await githubService.fetchReadme(repo.owner.login, repo.name);
-                // Add delay to avoid rate limits
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                const aiResult = await aiService.generateTagsAndSummary(
-                    repo.full_name, 
-                    repo.description || '', 
-                    readme || ''
-                );
-                
-                if (aiResult) {
-                    await db.repositories.update(repo.id, {
-                        ai_summary: aiResult.summary,
-                        ai_tags: aiResult.tags,
-                        readme_content: readme || undefined
-                    });
-                    // Update local object
-                    repo.ai_summary = aiResult.summary;
-                    repo.ai_tags = aiResult.tags;
-                    repo.readme_content = readme || undefined;
-                }
-            }
-
-            // 2. Vector Indexing
-            await vectorService.indexRepo(repo);
-            successCount++;
-        } catch (err) {
-            console.error(`Failed to index ${repo.full_name}`, err);
-            // Continue to next repo
-        }
-      }
-      
-      // Save vector store snapshot
-      await vectorService.save();
-
-      toast.success(`Indexing completed. Successfully indexed ${successCount}/${unindexed.length} repos.`);
+      const result = await indexRepositories(unindexed, false);
+      toast.success(`Indexing completed. Successfully indexed ${result.success}/${result.total} repos.`);
       await loadRepos();
     } catch (error) {
       toast.error('Indexing process failed');
@@ -189,6 +252,19 @@ export default function Dashboard() {
     } finally {
       setIndexing(false);
       setIndexingProgress({ current: 0, total: 0 });
+    }
+  };
+
+  const handleReindexOne = async (repo: Repository) => {
+    setReindexingId(repo.id);
+    try {
+      const result = await indexRepositories([repo], true);
+      toast.success(`Reindexed ${repo.full_name} (${result.success}/${result.total})`);
+      await loadRepos();
+    } catch (e) {
+      toast.error(`Reindex failed for ${repo.full_name}`);
+    } finally {
+      setReindexingId(null);
     }
   };
 
@@ -419,6 +495,18 @@ export default function Dashboard() {
                       {tag}
                     </Badge>
                   ))}
+                  <div className="ml-auto">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2 border-emerald-700/70 text-emerald-200 hover:bg-emerald-500/10"
+                      disabled={indexing || syncing || reindexingId === repo.id}
+                      onClick={() => handleReindexOne(repo)}
+                    >
+                      <RotateCcw className={`w-3 h-3 mr-1 ${reindexingId === repo.id ? 'animate-spin' : ''}`} />
+                      重新索引
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

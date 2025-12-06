@@ -49,4 +49,10 @@ export interface UserSettings {
   openai_api_key?: string;
   openai_api_base?: string;
   openai_model?: string;
+  // cached user profile
+  github_login?: string;
+  github_name?: string | null;
+  github_email?: string | null;
+  github_avatar?: string | null;
+  github_html_url?: string | null;
 }

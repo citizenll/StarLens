@@ -1,11 +1,57 @@
+import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Settings, Github, Command, Star, Book, LifeBuoy, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { githubService } from '@/lib/github';
+import { db } from '@/lib/db';
 
 export default function Layout() {
   const location = useLocation();
+  const [ghUser, setGhUser] = useState<{ login: string; name?: string | null; avatar_url?: string; email?: string | null; html_url?: string } | null>(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const settings = await db.settings.get('user_settings');
+        if (settings?.github_token) {
+          // use cached first
+          if (settings.github_login) {
+            setGhUser({
+              login: settings.github_login,
+              name: settings.github_name,
+              avatar_url: settings.github_avatar || undefined,
+              email: settings.github_email,
+              html_url: settings.github_html_url || undefined,
+            });
+          }
+          githubService.init(settings.github_token);
+          const user = await githubService.getUser();
+          setGhUser({
+            login: user.login,
+            name: user.name,
+            avatar_url: user.avatar_url,
+            email: user.email,
+            html_url: user.html_url,
+          });
+          // persist cache
+          await db.settings.put({
+            ...settings,
+            id: 'user_settings',
+            github_login: user.login,
+            github_name: user.name,
+            github_avatar: user.avatar_url,
+            github_email: user.email,
+            github_html_url: user.html_url,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load GitHub user', err);
+      }
+    };
+    loadUser();
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#050505] text-emerald-100 flex font-['Fira_Code',_monospace] antialiased relative crt overflow-hidden">
@@ -80,12 +126,14 @@ export default function Layout() {
              <Button variant="ghost" className="w-full justify-start h-auto py-2 px-2 border border-emerald-700/40 bg-[#0b1a11] text-emerald-100 hover:bg-[#0f2617]">
                 <div className="flex items-center gap-2">
                     <Avatar className="h-8 w-8 border border-emerald-600/60 shadow-[0_0_10px_rgba(16,255,128,0.4)]">
-                        <AvatarImage src="https://github.com/shadcn.png" />
-                        <AvatarFallback>CN</AvatarFallback>
+                        <AvatarImage src={ghUser?.avatar_url || "https://github.com/ghost.png"} />
+                        <AvatarFallback>{(ghUser?.login || '??').slice(0,2).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col items-start text-sm">
-                        <span className="font-medium">User</span>
-                        <span className="text-xs text-emerald-400/80">user@example.com</span>
+                        <span className="font-medium">{ghUser?.name || ghUser?.login || 'Not signed in'}</span>
+                        <span className="text-xs text-emerald-400/80">
+                          {ghUser?.email || ghUser?.login || '—'}
+                        </span>
                     </div>
                 </div>
              </Button>

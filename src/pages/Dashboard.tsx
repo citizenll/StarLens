@@ -15,7 +15,7 @@ const ITEMS_PER_PAGE = 20;
 const README_CONCURRENCY = 3;
 const INDEX_CONCURRENCY = 3;
 const AI_BATCH_SIZE = 4;
-const MAX_BATCH_SIZE_SINGLE = 1;
+const INDEX_BATCH_SIZE = 6;
 
 export default function Dashboard() {
   const [allRepos, setAllRepos] = useState<Repository[]>([]);
@@ -30,6 +30,8 @@ export default function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [reindexingId, setReindexingId] = useState<number | null>(null);
+  const [resumeJob, setResumeJob] = useState<{ queue: number[]; done: number; total: number } | null>(null);
+  const processingRef = useRef(false);
   const [indexingProgress, setIndexingProgress] = useState({ current: 0, total: 0 });
   const [stats, setStats] = useState({ total: 0, indexed: 0 });
 
@@ -50,6 +52,7 @@ export default function Dashboard() {
   useEffect(() => {
     loadRepos();
     checkServices();
+    checkPendingJob();
   }, []);
 
   // Apply filters and sorting whenever base data or filters change
@@ -87,6 +90,46 @@ export default function Dashboard() {
     }
   };
 
+  const resumeIndexJob = async (queue: number[], done: number, total: number) => {
+    if (processingRef.current) return;
+    processingRef.current = true;
+    setIndexing(true);
+    setIndexingProgress({ current: done, total });
+
+    let remaining = [...queue];
+    let successCount = 0;
+    let processed = 0;
+
+    while (remaining.length > 0) {
+      const batchIds = remaining.slice(0, INDEX_BATCH_SIZE);
+      const repos = await db.repositories.where('id').anyOf(batchIds).toArray();
+      const result = await indexRepositories(repos, false, done + processed, total);
+      successCount += result.success;
+      processed += repos.length;
+      remaining = remaining.slice(repos.length);
+
+      // persist progress
+      // @ts-ignore
+      await db.syncState.put({ id: 'index_job', queue: remaining, done: done + processed, total });
+      setResumeJob({ queue: remaining, done: done + processed, total });
+
+      // yield to UI
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    // clear job
+    // @ts-ignore
+    await db.syncState.delete('index_job');
+    setResumeJob(null);
+    setIndexing(false);
+    setIndexingProgress({ current: 0, total: 0 });
+    processingRef.current = false;
+
+    toast.success(`Indexing completed. Successfully indexed ${successCount}/${total} repos.`);
+    await loadRepos();
+    return { success: successCount, total };
+  };
+
   const checkServices = async () => {
     const settings = await db.settings.get('user_settings');
     if (settings) {
@@ -103,6 +146,17 @@ export default function Dashboard() {
     // Calculate stats
     const indexedCount = await db.repositories.filter(r => !!r.embedding).count();
     setStats({ total: repos.length, indexed: indexedCount });
+  };
+
+  const checkPendingJob = async () => {
+    // @ts-ignore
+    const job = await db.syncState.get('index_job') as any;
+    if (job && job.queue?.length) {
+      setResumeJob({ queue: job.queue, done: job.done || 0, total: job.total || job.queue.length });
+      setIndexingProgress({ current: job.done || 0, total: job.total || job.queue.length });
+      // Auto-resume
+      resumeIndexJob(job.queue, job.done || 0, job.total || job.queue.length);
+    }
   };
 
   const handleSync = async () => {
@@ -148,89 +202,99 @@ export default function Dashboard() {
     return results;
   };
 
-  const indexRepositories = async (repos: Repository[], forceReadme = false) => {
+  const indexRepositories = async (repos: Repository[], forceReadme = false, progressOffset = 0, progressTotal?: number) => {
     if (repos.length === 0) return { success: 0, total: 0 };
 
-    setIndexingProgress({ current: 0, total: repos.length });
+    setIndexingProgress({ current: progressOffset, total: progressTotal || repos.length });
     let successCount = 0;
     let processed = 0;
 
-    // 1) fetch readmes (cached unless force)
-    const readmeMap = new Map<number, string>();
-    await runWithPool(repos, README_CONCURRENCY, async (repo) => {
-      if (!forceReadme && repo.readme_content) {
-        readmeMap.set(repo.id, repo.readme_content);
-        return;
-      }
-      const readme = await githubService.fetchReadmeCached(repo, forceReadme);
-      readmeMap.set(repo.id, readme || '');
-    });
+    // Process in small batches to interleave README + AI + index
+    for (let start = 0; start < repos.length; start += INDEX_BATCH_SIZE) {
+      const batch = repos.slice(start, start + INDEX_BATCH_SIZE);
+      const readmeMap = new Map<number, string>();
 
-    // 2) batch AI calls
-    const aiMap = new Map<number, { summary: string; tags: string[] }>();
-    for (let i = 0; i < repos.length; i += AI_BATCH_SIZE) {
-      const batchRepos = repos.slice(i, i + AI_BATCH_SIZE);
-      const batchPayload = batchRepos.map((repo) => ({
-        id: repo.id,
-        name: repo.full_name,
-        description: repo.description || '',
-        readme: readmeMap.get(repo.id) || ''
-      }));
-      try {
-        const batchResults = await aiService.generateBatchTagsAndSummary(batchPayload);
-        batchResults.forEach((item: any) => {
-          if (item && item.id) {
-            aiMap.set(Number(item.id), { summary: item.summary, tags: item.tags });
-          }
-        });
-      } catch (err) {
-        console.error('AI batch failed, fallback single calls', err);
-        // fallback single calls for this batch
-        for (const repo of batchRepos) {
-          try {
-            const single = await aiService.generateTagsAndSummary(
-              repo.full_name,
-              repo.description || '',
-              readmeMap.get(repo.id) || ''
-            );
-            if (single) aiMap.set(repo.id, { summary: single.summary, tags: single.tags });
-          } catch (e) {
-            console.error(`AI single failed for ${repo.full_name}`, e);
-          }
+      // fetch readmes (cached unless force)
+      await runWithPool(batch, README_CONCURRENCY, async (repo) => {
+        if (!forceReadme && repo.readme_content) {
+          readmeMap.set(repo.id, repo.readme_content);
+          return;
         }
-      }
-    }
+        const readme = await githubService.fetchReadmeCached(repo, forceReadme);
+        readmeMap.set(repo.id, readme || '');
+      });
 
-    // 3) index + persist
-    await runWithPool(repos, INDEX_CONCURRENCY, async (repo) => {
-      try {
-        const aiResult = aiMap.get(repo.id);
-        if (aiResult) {
-          await db.repositories.update(repo.id, {
-            ai_summary: aiResult.summary,
-            ai_tags: aiResult.tags,
-            readme_content: readmeMap.get(repo.id) || undefined
+      // AI batch for this chunk
+      const aiMap = new Map<number, { summary: string; tags: string[] }>();
+      for (let i = 0; i < batch.length; i += AI_BATCH_SIZE) {
+        const chunk = batch.slice(i, i + AI_BATCH_SIZE);
+        const batchPayload = chunk.map((repo) => ({
+          id: repo.id,
+          name: repo.full_name,
+          description: repo.description || '',
+          readme: readmeMap.get(repo.id) || ''
+        }));
+        try {
+          const batchResults = await aiService.generateBatchTagsAndSummary(batchPayload);
+          batchResults.forEach((item: any) => {
+            if (item && item.id) {
+              aiMap.set(Number(item.id), { summary: item.summary, tags: item.tags });
+            }
           });
-          repo.ai_summary = aiResult.summary;
-          repo.ai_tags = aiResult.tags;
-          repo.readme_content = readmeMap.get(repo.id) || undefined;
+        } catch (err) {
+          console.error('AI batch failed, fallback single calls', err);
+          for (const repo of chunk) {
+            try {
+              const single = await aiService.generateTagsAndSummary(
+                repo.full_name,
+                repo.description || '',
+                readmeMap.get(repo.id) || ''
+              );
+              if (single) aiMap.set(repo.id, { summary: single.summary, tags: single.tags });
+            } catch (e) {
+              console.error(`AI single failed for ${repo.full_name}`, e);
+            }
+          }
         }
-
-        await vectorService.indexRepo(repo);
-        successCount++;
-      } catch (err) {
-        console.error(`Failed to index ${repo.full_name}`, err);
-      } finally {
-        processed++;
-        setIndexingProgress({ current: processed, total: repos.length });
       }
-    });
+
+      // index + persist for this chunk
+      await runWithPool(batch, INDEX_CONCURRENCY, async (repo) => {
+        try {
+          const aiResult = aiMap.get(repo.id);
+          if (aiResult) {
+            await db.repositories.update(repo.id, {
+              ai_summary: aiResult.summary,
+              ai_tags: aiResult.tags,
+              readme_content: readmeMap.get(repo.id) || undefined
+            });
+            repo.ai_summary = aiResult.summary;
+            repo.ai_tags = aiResult.tags;
+            repo.readme_content = readmeMap.get(repo.id) || undefined;
+          }
+
+          await vectorService.indexRepo(repo);
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to index ${repo.full_name}`, err);
+        } finally {
+          processed++;
+          setIndexingProgress({ current: progressOffset + processed, total: progressTotal || repos.length });
+        }
+      });
+    }
 
     await vectorService.save();
     return { success: successCount, total: repos.length };
   };
 
   const handleIndex = async () => {
+    // If there is a pending job, resume instead of creating a new one
+    if (!indexing && resumeJob && resumeJob.queue.length) {
+      await resumeIndexJob(resumeJob.queue, resumeJob.done, resumeJob.total);
+      return;
+    }
+
     setIndexing(true);
     try {
       const unindexed = await db.repositories
@@ -243,15 +307,17 @@ export default function Dashboard() {
       }
 
       toast.info(`Indexing ${unindexed.length} repositories...`);
-      const result = await indexRepositories(unindexed, false);
-      toast.success(`Indexing completed. Successfully indexed ${result.success}/${result.total} repos.`);
-      await loadRepos();
+      // Save job
+      // @ts-ignore
+      await db.syncState.put({ id: 'index_job', queue: unindexed.map(r => r.id), done: 0, total: unindexed.length });
+      setResumeJob({ queue: unindexed.map(r => r.id), done: 0, total: unindexed.length });
+
+      await resumeIndexJob(unindexed.map(r => r.id), 0, unindexed.length);
     } catch (error) {
       toast.error('Indexing process failed');
       console.error(error);
     } finally {
-      setIndexing(false);
-      setIndexingProgress({ current: 0, total: 0 });
+      // handled inside resumeIndexJob
     }
   };
 
@@ -270,8 +336,29 @@ export default function Dashboard() {
 
   const performSearch = async (query: string) => {
     try {
-      const results = await vectorService.search(query);
-      setAllRepos(results as Repository[]);
+      const vectorResults = await vectorService.search(query);
+      const vectorIds = new Set((vectorResults as Repository[]).map(r => r.id));
+
+      // keyword fallback over DB
+      const all = await db.repositories.toArray();
+      const q = query.toLowerCase();
+      const keywordMatches = all.filter(r =>
+        r.name.toLowerCase().includes(q) ||
+        (r.full_name && r.full_name.toLowerCase().includes(q)) ||
+        (r.description && r.description.toLowerCase().includes(q)) ||
+        (r.ai_summary && r.ai_summary.toLowerCase().includes(q)) ||
+        (r.ai_tags && r.ai_tags.some(t => t.toLowerCase().includes(q))) ||
+        (r.readme_content && r.readme_content.toLowerCase().includes(q))
+      );
+
+      // merge, keep vector order first, then keyword matches not already in vector
+      const merged: Repository[] = [];
+      (vectorResults as Repository[]).forEach(r => merged.push(r));
+      keywordMatches.forEach(r => {
+        if (!vectorIds.has(r.id)) merged.push(r);
+      });
+
+      setAllRepos(merged);
       setSelectedLanguage('all');
       setSelectedTag('all');
       setPage(1);
@@ -313,6 +400,13 @@ export default function Dashboard() {
     )
   ).slice(0, 12);
 
+  const progressCurrent = indexingProgress.current;
+  const progressTotal = indexingProgress.total || resumeJob?.total || 0;
+  const effectiveIndexed = Math.min(stats.indexed + progressCurrent, stats.total || stats.indexed + progressCurrent);
+  const effectiveTotal = stats.total || (progressTotal + stats.indexed);
+  const indexedDisplay = (indexing || (resumeJob && resumeJob.queue.length > 0)) ? effectiveIndexed : stats.indexed;
+  const totalDisplay = stats.total || effectiveTotal;
+
   return (
     <div className="space-y-8 pb-12">
       <div className="relative overflow-hidden rounded-2xl border border-emerald-600/50 bg-gradient-to-r from-[#0a1a0f] via-[#07140f] to-[#0a1a0f] text-emerald-100 p-5 sm:p-6 shadow-[0_0_40px_rgba(16,255,128,0.12)]">
@@ -330,11 +424,11 @@ export default function Dashboard() {
             </p>
             <div className="flex flex-wrap gap-3 mt-4">
               <div className="rounded-full border border-emerald-500/40 px-3 py-1 text-sm backdrop-blur bg-[#0d1f14]/70">
-                {stats.indexed}/{stats.total} indexed
+                {indexedDisplay}/{totalDisplay} indexed
               </div>
               {(syncing || indexing) && (
                 <div className="rounded-full border border-emerald-500/40 px-3 py-1 text-sm backdrop-blur bg-[#0d1f14]/70">
-                  {syncing ? 'Syncing latest stars…' : `Indexing (${indexingProgress.current}/${indexingProgress.total})`}
+                  {syncing ? 'Syncing latest stars…' : `Indexing (${indexedDisplay}/${totalDisplay})`}
                 </div>
               )}
             </div>
@@ -342,7 +436,7 @@ export default function Dashboard() {
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             {/* @ts-ignore */}
             <Button variant="secondary" className="glitch-hover border border-emerald-500/50 bg-[#0f2a16] text-emerald-50 hover:bg-[#143621]" onClick={handleIndex} disabled={indexing || syncing}>
-              {indexing ? `Indexing (${indexingProgress.current}/${indexingProgress.total})` : 'Index All'}
+              {indexing ? `Indexing (${indexedDisplay}/${totalDisplay})` : resumeJob ? '继续索引' : 'Index All'}
             </Button>
             <Button onClick={handleSync} disabled={syncing || indexing} className="glitch-hover border border-emerald-400/70 bg-emerald-400 text-[#05220f] hover:bg-emerald-300">
               <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />

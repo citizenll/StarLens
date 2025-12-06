@@ -54,15 +54,25 @@ Output format (JSON):
   }
   
   async getEmbedding(text: string) {
-      if (!this.openai) throw new Error('AI client not initialized');
-      
-      const response = await this.openai.embeddings.create({
-          model: "text-embedding-3-small",
-          input: text,
-          encoding_format: "float",
-      });
-      
-      return response.data[0].embedding;
+      // Local, lightweight embedding to avoid network/CORS issues.
+      // Uses a simple hashed bag-of-words into 256-dim vector, then L2-normalized.
+      const dim = 256;
+      const vec = new Float32Array(dim);
+      const tokens = text.toLowerCase().split(/\W+/).filter(Boolean);
+      for (const t of tokens) {
+        let h = 0;
+        for (let i = 0; i < t.length; i++) {
+          h = (h * 31 + t.charCodeAt(i)) >>> 0;
+        }
+        const idx = h % dim;
+        vec[idx] += 1;
+      }
+      // normalize
+      let norm = 0;
+      for (let i = 0; i < dim; i++) norm += vec[i] * vec[i];
+      norm = Math.sqrt(norm) || 1;
+      for (let i = 0; i < dim; i++) vec[i] /= norm;
+      return Array.from(vec);
   }
 }
 

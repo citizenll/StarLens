@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,12 +7,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { db } from '@/lib/db';
 import { githubService } from '@/lib/github';
 import { aiService } from '@/lib/ai';
+import { backupService } from '@/lib/backup';
 
 export default function Settings() {
   const [githubToken, setGithubToken] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [openaiBase, setOpenaiBase] = useState('');
   const [loading, setLoading] = useState(false);
+  const [transfering, setTransfering] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -47,6 +50,42 @@ export default function Settings() {
       console.error(error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setTransfering(true);
+    try {
+      await backupService.download();
+      toast.success('导出完成');
+    } catch (e) {
+      console.error(e);
+      toast.error('导出失败');
+    } finally {
+      setTransfering(false);
+    }
+  };
+
+  const handleImportFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setTransfering(true);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      await backupService.import(payload);
+      await loadSettings();
+      toast.success('导入完成');
+    } catch (err) {
+      console.error(err);
+      toast.error('导入失败，请检查文件');
+    } finally {
+      setTransfering(false);
+      e.target.value = '';
     }
   };
 
@@ -118,6 +157,28 @@ export default function Settings() {
           </Button>
         </div>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Data Transfer</CardTitle>
+          <CardDescription>导出/导入所有数据（设置、仓库、索引快照）。</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={onFileSelected}
+          />
+          <Button variant="outline" onClick={handleExport} disabled={transfering}>
+            导出数据
+          </Button>
+          <Button onClick={handleImportFile} disabled={transfering}>
+            导入数据
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

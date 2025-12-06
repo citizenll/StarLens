@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { toast } from 'sonner';
 import { RefreshCw, Search, Star, Sparkles, SlidersHorizontal, Clock3, ArrowUpWideNarrow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -239,24 +239,25 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-12">
-      <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-6">
-        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top,_#38bdf8_0,_transparent_35%),radial-gradient(circle_at_30%_40%,_#a855f7_0,_transparent_25%)]" />
+      <div className="relative overflow-hidden rounded-2xl border border-emerald-600/50 bg-gradient-to-r from-[#0a1a0f] via-[#07140f] to-[#0a1a0f] text-emerald-100 p-6 shadow-[0_0_40px_rgba(16,255,128,0.12)]">
+        <div className="absolute inset-0 opacity-20 bg-[linear-gradient(transparent_95%,rgba(0,255,128,0.25)_100%),linear-gradient(90deg,rgba(0,255,128,0.05)_1px,transparent_1px)] bg-[length:100%_4px,32px_100%]" />
+        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(0,255,128,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(0,255,255,0.18),transparent_30%)] opacity-40" />
         <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-slate-200/80">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-emerald-300/80">
               <Sparkles className="w-4 h-4" />
               AI Star Agent
             </div>
-            <h2 className="text-3xl font-semibold mt-1">Search & curate your GitHub stars</h2>
-            <p className="text-slate-200/80 mt-2 max-w-2xl">
-              Local-first向量索引 + AI 摘要与标签，支持自然语言搜索、过滤与增量同步。
+            <h2 className="text-3xl font-semibold mt-1 text-emerald-100">Search & curate your GitHub stars</h2>
+            <p className="text-emerald-200/80 mt-2 max-w-2xl">
+              Local-first 向量索引 + AI 摘要与标签，支持自然语言搜索、过滤与增量同步。
             </p>
             <div className="flex flex-wrap gap-3 mt-4">
-              <div className="rounded-full bg-white/10 px-3 py-1 text-sm backdrop-blur">
+              <div className="rounded-full border border-emerald-500/40 px-3 py-1 text-sm backdrop-blur bg-[#0d1f14]/70">
                 {stats.indexed}/{stats.total} indexed
               </div>
               {(syncing || indexing) && (
-                <div className="rounded-full bg-white/10 px-3 py-1 text-sm backdrop-blur">
+                <div className="rounded-full border border-emerald-500/40 px-3 py-1 text-sm backdrop-blur bg-[#0d1f14]/70">
                   {syncing ? 'Syncing latest stars…' : `Indexing (${indexingProgress.current}/${indexingProgress.total})`}
                 </div>
               )}
@@ -264,10 +265,10 @@ export default function Dashboard() {
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
             {/* @ts-ignore */}
-            <Button variant="secondary" className="bg-white/10 text-white hover:bg-white/20" onClick={handleIndex} disabled={indexing || syncing}>
+            <Button variant="secondary" className="glitch-hover border border-emerald-500/50 bg-[#0f2a16] text-emerald-50 hover:bg-[#143621]" onClick={handleIndex} disabled={indexing || syncing}>
               {indexing ? `Indexing (${indexingProgress.current}/${indexingProgress.total})` : 'Index All'}
             </Button>
-            <Button onClick={handleSync} disabled={syncing || indexing} className="bg-white text-slate-900 hover:bg-slate-100">
+            <Button onClick={handleSync} disabled={syncing || indexing} className="glitch-hover border border-emerald-400/70 bg-emerald-400 text-[#05220f] hover:bg-emerald-300">
               <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
               Sync Stars
             </Button>
@@ -275,36 +276,36 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <Card className="border shadow-sm">
+      <Card className="border border-emerald-700/50 bg-[#08130c]/70 shadow-[0_0_24px_rgba(16,255,128,0.12)]">
         <CardContent className="pt-6 space-y-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-3 h-4 w-4 text-emerald-400/80" />
               <Input 
                 placeholder="用自然语言搜索：'react 状态管理' / '机器学习可视化' ..." 
-                className="pl-10 h-11"
+                className="pl-10 h-11 bg-[#050c07] border border-emerald-700/60 text-emerald-100 placeholder:text-emerald-300/50"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
             <div className="flex flex-wrap gap-2">
               {/* @ts-ignore */}
-              <Button variant={sortBy === 'recent' ? 'default' : 'outline'} size="sm" onClick={() => setSortBy('recent')}>
+              <Button variant={sortBy === 'recent' ? 'default' : 'outline'} size="sm" onClick={() => setSortBy('recent')} className="border border-emerald-600/40">
                 <Clock3 className="w-4 h-4 mr-1" /> 最新
               </Button>
               {/* @ts-ignore */}
-              <Button variant={sortBy === 'stars' ? 'default' : 'outline'} size="sm" onClick={() => setSortBy('stars')}>
+              <Button variant={sortBy === 'stars' ? 'default' : 'outline'} size="sm" onClick={() => setSortBy('stars')} className="border border-emerald-600/40">
                 <Star className="w-4 h-4 mr-1" /> Stars
               </Button>
               {/* @ts-ignore */}
-              <Button variant={sortBy === 'indexed' ? 'default' : 'outline'} size="sm" onClick={() => setSortBy('indexed')}>
+              <Button variant={sortBy === 'indexed' ? 'default' : 'outline'} size="sm" onClick={() => setSortBy('indexed')} className="border border-emerald-600/40">
                 <ArrowUpWideNarrow className="w-4 h-4 mr-1" /> 已索引优先
               </Button>
             </div>
           </div>
 
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-emerald-300/80">
               <SlidersHorizontal className="w-4 h-4" />
               快速过滤
             </div>
@@ -312,7 +313,11 @@ export default function Dashboard() {
               {/* @ts-ignore */}
               <Badge 
                 variant={selectedLanguage === 'all' ? 'default' : 'outline'} 
-                className="cursor-pointer"
+                className={
+                  selectedLanguage === 'all'
+                    ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
+                    : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                }
                 onClick={() => setSelectedLanguage('all')}
               >
                 全部语言
@@ -322,7 +327,11 @@ export default function Dashboard() {
                 <Badge 
                   key={lang} 
                   variant={selectedLanguage === lang ? 'default' : 'outline'} 
-                  className="cursor-pointer"
+                  className={
+                    selectedLanguage === lang
+                      ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
+                      : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                  }
                   onClick={() => setSelectedLanguage(lang)}
                 >
                   {lang}
@@ -334,7 +343,11 @@ export default function Dashboard() {
               {/* @ts-ignore */}
               <Badge 
                 variant={selectedTag === 'all' ? 'default' : 'outline'} 
-                className="cursor-pointer"
+                className={
+                  selectedTag === 'all'
+                    ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
+                    : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                }
                 onClick={() => setSelectedTag('all')}
               >
                 全部标签
@@ -344,7 +357,11 @@ export default function Dashboard() {
                 <Badge 
                   key={tag} 
                   variant={selectedTag === tag ? 'default' : 'outline'} 
-                  className="cursor-pointer"
+                  className={
+                    selectedTag === tag
+                      ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
+                      : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                  }
                   onClick={() => setSelectedTag(tag)}
                 >
                   {tag}
@@ -357,8 +374,8 @@ export default function Dashboard() {
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {visibleRepos.map((repo) => (
-            <Card key={repo.id} className="flex flex-col overflow-hidden hover:shadow-md transition-shadow">
-              <CardHeader className="pb-3 bg-muted/10 border-b">
+            <Card key={repo.id} className="flex flex-col overflow-hidden hover:shadow-[0_0_20px_rgba(16,255,128,0.22)] transition-shadow border border-emerald-700/50 bg-[#050b07]/80 card-enter">
+              <CardHeader className="pb-3 bg-[#08130c]/70 border-b border-emerald-800/50">
                 <div className="flex justify-between items-start gap-2">
                   <CardTitle className="text-base font-semibold leading-tight truncate" title={repo.full_name}>
                     <a 
@@ -372,33 +389,33 @@ export default function Dashboard() {
                     </a>
                   </CardTitle>
                   <div className="flex items-center text-muted-foreground text-xs shrink-0 bg-background border px-1.5 py-0.5 rounded-full">
-                    <Star className="w-3 h-3 mr-1 fill-current text-yellow-500" />
-                    {repo.stargazers_count.toLocaleString()}
+                    <Star className="w-3 h-3 mr-1 fill-current text-emerald-300" />
+                    <span className="text-emerald-200">{repo.stargazers_count.toLocaleString()}</span>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col gap-4 p-4">
-                <CardDescription className="line-clamp-2 text-sm min-h-[2.5em]">
+                <CardDescription className="line-clamp-2 text-sm min-h-[2.5em] text-emerald-200/80">
                   {repo.description || "No description provided."}
                 </CardDescription>
 
                 {repo.ai_summary && (
-                  <div className="text-xs bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 p-2.5 rounded-md border border-blue-100 dark:border-blue-900/50">
-                    <span className="font-semibold mr-1">AI:</span> {repo.ai_summary}
+                  <div className="text-xs bg-[#0b1f14] text-emerald-100 p-2.5 rounded-md border border-emerald-700/60 shadow-[0_0_10px_rgba(16,255,128,0.12)]">
+                    <span className="font-semibold mr-1 text-emerald-300">AI:</span> {repo.ai_summary}
                   </div>
                 )}
                 
                 <div className="mt-auto pt-2 flex flex-wrap gap-1.5">
                   {repo.language && (
                     // @ts-ignore
-                    <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-normal">
+                    <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-normal border-emerald-700/70 bg-[#0a1a11] text-emerald-200">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary mr-1.5 opacity-70"></span>
                       {repo.language}
                     </Badge>
                   )}
                   {repo.ai_tags?.slice(0, 3).map(tag => (
                     // @ts-ignore
-                    <Badge key={tag} variant="secondary" className="text-[10px] h-5 px-1.5 font-normal bg-muted hover:bg-muted/80">
+                    <Badge key={tag} variant="secondary" className="text-[10px] h-5 px-1.5 font-normal bg-[#0d1f14] hover:bg-[#112a1c] text-emerald-200 border border-emerald-700/60">
                       {tag}
                     </Badge>
                   ))}
@@ -425,7 +442,7 @@ export default function Dashboard() {
       </div>
       
       {/* Loading trigger for infinite scroll */}
-      {visibleRepos.length < allRepos.length && (
+      {visibleRepos.length < filteredRepos.length && (
         <div ref={observerTarget} className="py-4 text-center text-muted-foreground text-sm">
           Loading more repositories...
         </div>

@@ -239,7 +239,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-12">
-      <div className="relative overflow-hidden rounded-2xl border border-emerald-600/50 bg-gradient-to-r from-[#0a1a0f] via-[#07140f] to-[#0a1a0f] text-emerald-100 p-6 shadow-[0_0_40px_rgba(16,255,128,0.12)]">
+      <div className="relative overflow-hidden rounded-2xl border border-emerald-600/50 bg-gradient-to-r from-[#0a1a0f] via-[#07140f] to-[#0a1a0f] text-emerald-100 p-5 sm:p-6 shadow-[0_0_40px_rgba(16,255,128,0.12)]">
         <div className="absolute inset-0 opacity-20 bg-[linear-gradient(transparent_95%,rgba(0,255,128,0.25)_100%),linear-gradient(90deg,rgba(0,255,128,0.05)_1px,transparent_1px)] bg-[length:100%_4px,32px_100%]" />
         <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(0,255,128,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(0,255,255,0.18),transparent_30%)] opacity-40" />
         <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -263,7 +263,7 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             {/* @ts-ignore */}
             <Button variant="secondary" className="glitch-hover border border-emerald-500/50 bg-[#0f2a16] text-emerald-50 hover:bg-[#143621]" onClick={handleIndex} disabled={indexing || syncing}>
               {indexing ? `Indexing (${indexingProgress.current}/${indexingProgress.total})` : 'Index All'}
@@ -279,7 +279,7 @@ export default function Dashboard() {
       <Card className="border border-emerald-700/50 bg-[#08130c]/70 shadow-[0_0_24px_rgba(16,255,128,0.12)]">
         <CardContent className="pt-6 space-y-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
-            <div className="relative flex-1">
+            <div className="relative w-full">
               <Search className="absolute left-3 top-3 h-4 w-4 text-emerald-400/80" />
               <Input 
                 placeholder="用自然语言搜索：'react 状态管理' / '机器学习可视化' ..." 
@@ -372,7 +372,7 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {visibleRepos.map((repo) => (
             <Card key={repo.id} className="flex flex-col overflow-hidden hover:shadow-[0_0_20px_rgba(16,255,128,0.22)] transition-shadow border border-emerald-700/50 bg-[#050b07]/80 card-enter">
               <CardHeader className="pb-3 bg-[#08130c]/70 border-b border-emerald-800/50">

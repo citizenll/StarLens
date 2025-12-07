@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   RefreshCw,
@@ -31,6 +31,8 @@ import { githubService } from "@/lib/github";
 import { vectorService } from "@/lib/vector";
 import { searchService } from "@/lib/search";
 import { aiService } from "@/lib/ai";
+import { useThemeMode } from "@/lib/theme";
+import { useI18n } from "@/lib/i18n";
 import type { Repository } from "@/types";
 
 const ITEMS_PER_PAGE = 20;
@@ -40,6 +42,7 @@ const AI_BATCH_SIZE = 4;
 const INDEX_BATCH_SIZE = 6;
 
 export default function Dashboard() {
+  const { t, lang } = useI18n();
   const [allRepos, setAllRepos] = useState<Repository[]>([]);
   const [filteredRepos, setFilteredRepos] = useState<Repository[]>([]);
   const [visibleRepos, setVisibleRepos] = useState<Repository[]>([]);
@@ -69,6 +72,8 @@ export default function Dashboard() {
     total: 0,
   });
   const [stats, setStats] = useState({ total: 0, indexed: 0 });
+  const { theme } = useThemeMode();
+  const isDark = useMemo(() => theme === "dark", [theme]);
 
   // Debounce search (AI 模式仅回车触发，不跟随输入)
   useEffect(() => {
@@ -565,6 +570,46 @@ export default function Dashboard() {
     new Set(allRepos.flatMap((repo) => repo.ai_tags || []))
   ).slice(0, 12);
 
+  const heroCardClass = isDark
+    ? "relative overflow-hidden rounded-2xl p-5 sm:p-6 border border-emerald-600/50 bg-gradient-to-r from-[#0a1a0f] via-[#07140f] to-[#0a1a0f] text-emerald-100 shadow-[0_0_40px_rgba(16,255,128,0.12)]"
+    : "relative overflow-hidden rounded-2xl p-5 sm:p-6 border border-border bg-white text-foreground shadow-sm";
+  const statPillClass = isDark
+    ? "rounded-full border border-emerald-500/40 px-3 py-1 text-sm backdrop-blur bg-[#0d1f14]/70"
+    : "rounded-full border border-border px-3 py-1 text-sm bg-muted text-foreground";
+  const indexButtonClass = isDark
+    ? "glitch-hover border border-emerald-500/50 bg-[#0f2a16] text-emerald-50 hover:bg-[#143621]"
+    : "border border-primary bg-primary text-primary-foreground hover:bg-primary/90";
+  const syncButtonClass = isDark
+    ? "glitch-hover border border-emerald-400/70 bg-emerald-400 text-[#05220f] hover:bg-emerald-300"
+    : "border border-primary/70 bg-primary/90 text-primary-foreground hover:bg-primary";
+  const searchCardClass = isDark
+    ? "border border-emerald-700/50 bg-[#08130c]/70 shadow-[0_0_24px_rgba(16,255,128,0.12)]"
+    : "border border-border bg-white shadow-sm";
+  const filterActiveClass = isDark
+    ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
+    : "cursor-pointer border border-primary bg-primary text-primary-foreground shadow-sm";
+  const filterInactiveClass = isDark
+    ? "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+    : "cursor-pointer border border-border bg-muted text-foreground hover:bg-muted/80";
+  const repoCardClass = isDark
+    ? "flex flex-col overflow-hidden hover:shadow-[0_0_20px_rgba(16,255,128,0.22)] transition-shadow border border-emerald-700/50 bg-[#050b07]/80 card-enter"
+    : "flex flex-col overflow-hidden transition-shadow border border-border bg-white shadow-sm card-enter";
+  const repoHeaderClass = isDark
+    ? "pb-3 bg-[#08130c]/70 border-b border-emerald-800/50"
+    : "pb-3 bg-muted/30 border-b border-border";
+  const aiSummaryClass = isDark
+    ? "text-xs bg-[#0b1f14] text-emerald-100 p-2.5 rounded-md border border-emerald-700/60 shadow-[0_0_10px_rgba(16,255,128,0.12)]"
+    : "text-xs bg-muted text-foreground p-2.5 rounded-md border border-border";
+  const langBadgeClass = isDark
+    ? "text-[10px] h-5 px-1.5 font-normal border-emerald-700/70 bg-[#0a1a11] text-emerald-200"
+    : "text-[10px] h-5 px-1.5 font-normal border border-border bg-muted text-foreground";
+  const tagBadgeClass = isDark
+    ? "text-[10px] h-5 px-1.5 font-normal bg-[#0d1f14] hover:bg-[#112a1c] text-emerald-200 border border-emerald-700/60"
+    : "text-[10px] h-5 px-1.5 font-normal bg-muted text-foreground border border-border";
+  const reindexBtnClass = isDark
+    ? "h-6 px-2 border-emerald-700/70 text-emerald-200 hover:bg-emerald-500/10"
+    : "h-6 px-2 border border-border text-foreground hover:bg-muted";
+
   const progressCurrent = indexingProgress.current;
   const progressTotal = indexingProgress.total || resumeJob?.total || 0;
   const effectiveIndexed = Math.min(
@@ -580,31 +625,50 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-12">
-      <div className="relative overflow-hidden rounded-2xl border border-emerald-600/50 bg-gradient-to-r from-[#0a1a0f] via-[#07140f] to-[#0a1a0f] text-emerald-100 p-5 sm:p-6 shadow-[0_0_40px_rgba(16,255,128,0.12)]">
-        <div className="absolute inset-0 opacity-20 bg-[linear-gradient(transparent_95%,rgba(0,255,128,0.25)_100%),linear-gradient(90deg,rgba(0,255,128,0.05)_1px,transparent_1px)] bg-[length:100%_4px,32px_100%]" />
-        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(0,255,128,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(0,255,255,0.18),transparent_30%)] opacity-40" />
+      <div className={heroCardClass}>
+        {isDark && (
+          <>
+            <div className="absolute inset-0 opacity-20 bg-[linear-gradient(transparent_95%,rgba(0,255,128,0.25)_100%),linear-gradient(90deg,rgba(0,255,128,0.05)_1px,transparent_1px)] bg-[length:100%_4px,32px_100%]" />
+            <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,rgba(0,255,128,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(0,255,255,0.18),transparent_30%)] opacity-40" />
+          </>
+        )}
         <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-emerald-300/80">
+            <div
+              className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] ${
+                isDark ? "text-emerald-300/80" : "text-muted-foreground"
+              }`}
+            >
               <Sparkles className="w-4 h-4" />
               AI Star Agent
             </div>
-            <h2 className="text-3xl font-semibold mt-1 text-emerald-100">
-              Search & curate your GitHub stars
+            <h2
+              className={`text-3xl font-semibold mt-1 ${
+                isDark ? "text-emerald-100" : "text-foreground"
+              }`}
+            >
+              {t("hero.title")}
             </h2>
-            <p className="text-emerald-200/80 mt-2 max-w-2xl">
-              Local-first 向量索引 + AI
-              摘要与标签，支持自然语言搜索、过滤与增量同步。
+            <p
+              className={`mt-2 max-w-2xl ${
+                isDark ? "text-emerald-200/80" : "text-muted-foreground"
+              }`}
+            >
+              {t("hero.subtitle")}
             </p>
             <div className="flex flex-wrap gap-3 mt-4">
-              <div className="rounded-full border border-emerald-500/40 px-3 py-1 text-sm backdrop-blur bg-[#0d1f14]/70">
-                {indexedDisplay}/{totalDisplay} indexed
+              <div className={statPillClass}>
+                {indexedDisplay}/{totalDisplay} {t("stats.indexed")}
               </div>
               {(syncing || indexing) && (
-                <div className="rounded-full border border-emerald-500/40 px-3 py-1 text-sm backdrop-blur bg-[#0d1f14]/70">
+                <div className={statPillClass}>
                   {syncing
-                    ? "Syncing latest stars…"
-                    : `Indexing (${indexedDisplay}/${totalDisplay})`}
+                    ? lang === "zh"
+                      ? "同步最新 Stars…"
+                      : "Syncing latest stars…"
+                    : `${
+                        lang === "zh" ? "索引中" : "Indexing"
+                      } (${indexedDisplay}/${totalDisplay})`}
                 </div>
               )}
             </div>
@@ -613,38 +677,50 @@ export default function Dashboard() {
             {/* @ts-ignore */}
             <Button
               variant="secondary"
-              className="glitch-hover border border-emerald-500/50 bg-[#0f2a16] text-emerald-50 hover:bg-[#143621]"
+              className={indexButtonClass}
               onClick={handleIndex}
               disabled={indexing || syncing}
             >
               {indexing
-                ? `Indexing (${indexedDisplay}/${totalDisplay})`
+                ? `${
+                    lang === "zh" ? "索引中" : "Indexing"
+                  } (${indexedDisplay}/${totalDisplay})`
                 : resumeJob
-                ? "继续索引"
-                : "Index All"}
+                ? lang === "zh"
+                  ? "继续索引"
+                  : "Resume"
+                : t("btn.indexAll")}
             </Button>
             <Button
               onClick={handleSync}
               disabled={syncing || indexing}
-              className="glitch-hover border border-emerald-400/70 bg-emerald-400 text-[#05220f] hover:bg-emerald-300"
+              className={syncButtonClass}
             >
               <RefreshCw
                 className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`}
               />
-              Sync Stars
+              {t("btn.sync")}
             </Button>
           </div>
         </div>
       </div>
 
-      <Card className="border border-emerald-700/50 bg-[#08130c]/70 shadow-[0_0_24px_rgba(16,255,128,0.12)]">
+      <Card className={searchCardClass}>
         <CardContent className="pt-6 space-y-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
             <div className="relative w-full">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-emerald-400/80" />
+              <Search
+                className={`absolute left-3 top-3 h-4 w-4 ${
+                  isDark ? "text-emerald-400/80" : "text-muted-foreground"
+                }`}
+              />
               <Input
-                placeholder="用自然语言搜索：'react 状态管理' / '机器学习可视化' ..."
-                className="pl-10 pr-40 h-11 bg-[#050c07] border border-emerald-700/60 text-emerald-100 placeholder:text-emerald-300/50"
+                placeholder={t("search.placeholder")}
+                className={`pl-10 pr-44 h-11 rounded-md ${
+                  isDark
+                    ? "bg-[#050c07] border border-emerald-700/60 text-emerald-100 placeholder:text-emerald-300/50"
+                    : "bg-white border border-border text-foreground placeholder:text-muted-foreground"
+                }`}
                 value={searchQuery}
                 onChange={(e) => {
                   if (inputLocked) return;
@@ -658,41 +734,52 @@ export default function Dashboard() {
                 }}
                 disabled={inputLocked}
               />
-              <div className="absolute inset-y-0 right-1 flex items-center gap-1 pl-2 pr-1">
-                {searchLoading && (
-                  <div className=" text-xs text-emerald-300 animate-pulse">
-                    Searching…
-                  </div>
-                )}
-                {!searchLoading && (
-                  <div className="px-2 h-9 flex items-center text-lg text-emerald-300/80 pointer-events-none">
-                    ↩︎
-                  </div>
-                )}
+              <div className="absolute inset-y-1 right-1 flex items-center gap-2 pl-2">
                 <div
-                  className={`px-2 h-9 flex items-center gap-1 rounded border ${
+                  className={`h-9 px-3 flex items-center  text-base ${
+                    isDark ? "text-emerald-200" : ""
+                  } ${searchLoading ? "animate-pulse" : ""}`}
+                >
+                  {searchLoading
+                    ? lang === "zh"
+                      ? "搜索中…"
+                      : "Searching…"
+                    : "↩︎"}
+                </div>
+                <div
+                  className={`h-9 px-3 flex items-center gap-1 rounded-md border transition-colors ${
                     useAiSearch
-                      ? "border-emerald-400/70 bg-emerald-400/10"
-                      : "border-emerald-700/50 bg-transparent"
-                  } cursor-pointer`}
+                      ? isDark
+                        ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
+                        : "border-primary bg-primary/10 text-primary"
+                      : isDark
+                      ? "border-emerald-700/60 bg-[#0b1a11] text-emerald-300/80"
+                      : "border-border bg-muted text-muted-foreground"
+                  } ${
+                    inputLocked
+                      ? "opacity-60 cursor-not-allowed"
+                      : "cursor-pointer"
+                  }`}
                   onClick={() => !inputLocked && setUseAiSearch((v) => !v)}
                   title="AI 改写查询"
                 >
-                  <Sparkles
-                    className={`w-4 h-4 ${
-                      useAiSearch ? "text-emerald-200" : "text-emerald-500/60"
-                    }`}
-                  />
-                  <span className="text-xs">AI</span>
+                  <Sparkles className="w-4 h-4" />
+                  <span className="text-xs">{t("ai.rewrite")}</span>
                 </div>
                 <div
-                  className={`px-2 h-9 flex items-center gap-1 rounded border ${
+                  className={`h-9 px-3 flex items-center gap-1 rounded-md border transition-colors ${
                     useAiRerank && useAiSearch
-                      ? "border-emerald-400/70 bg-emerald-400/10"
-                      : "border-emerald-700/50 bg-transparent"
+                      ? isDark
+                        ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
+                        : "border-primary bg-primary/10 text-primary"
+                      : isDark
+                      ? "border-emerald-700/60 bg-[#0b1a11] text-emerald-300/80"
+                      : "border-border bg-muted text-muted-foreground"
                   } ${
                     useAiSearch
-                      ? "cursor-pointer"
+                      ? inputLocked
+                        ? "opacity-60 cursor-not-allowed"
+                        : "cursor-pointer"
                       : "opacity-50 cursor-not-allowed"
                   }`}
                   onClick={() => {
@@ -701,14 +788,8 @@ export default function Dashboard() {
                   }}
                   title="AI 重排候选"
                 >
-                  <ArrowUpWideNarrow
-                    className={`w-4 h-4 ${
-                      useAiRerank && useAiSearch
-                        ? "text-emerald-200"
-                        : "text-emerald-500/60"
-                    }`}
-                  />
-                  <span className="text-xs">重排</span>
+                  <ArrowUpWideNarrow className="w-4 h-4" />
+                  <span className="text-xs">{t("ai.rerank")}</span>
                 </div>
               </div>
             </div>
@@ -719,28 +800,37 @@ export default function Dashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-11 border border-emerald-600/40"
+                    className={`h-10 px-3 ${
+                      isDark
+                        ? "border border-emerald-600/40 text-emerald-100 bg-[#0b1a11]"
+                        : "border border-border text-foreground bg-white"
+                    }`}
                   >
-                    排序：
+                    {t("sort.label")}：
                     {sortBy === "recent"
-                      ? "最新"
+                      ? t("sort.latest")
                       : sortBy === "stars"
-                      ? "Stars"
-                      : "已索引优先"}
+                      ? t("sort.stars")
+                      : t("sort.indexed")}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="end"
-                  className="bg-[#0b1a11] text-emerald-100 border-emerald-700/50"
+                  className={`${
+                    isDark
+                      ? "bg-[#0b1a11] text-emerald-100 border-emerald-700/50"
+                      : "bg-white text-foreground border border-border shadow-sm"
+                  }`}
                 >
                   <DropdownMenuItem onClick={() => setSortBy("recent")}>
-                    <Clock3 className="w-4 h-4 mr-2" /> 最新
+                    <Clock3 className="w-4 h-4 mr-2" /> {t("sort.latest")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setSortBy("stars")}>
-                    <Star className="w-4 h-4 mr-2" /> Stars
+                    <Star className="w-4 h-4 mr-2" /> {t("sort.stars")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setSortBy("indexed")}>
-                    <ArrowUpWideNarrow className="w-4 h-4 mr-2" /> 已索引优先
+                    <ArrowUpWideNarrow className="w-4 h-4 mr-2" />{" "}
+                    {t("sort.indexed")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -748,9 +838,13 @@ export default function Dashboard() {
           </div>
 
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-emerald-300/80">
+            <div
+              className={`flex items-center gap-2 text-sm ${
+                isDark ? "text-emerald-300/80" : "text-muted-foreground"
+              }`}
+            >
               <SlidersHorizontal className="w-4 h-4" />
-              快速过滤
+              {t("filters.quick")}
             </div>
             <div className="flex flex-wrap gap-2">
               {/* @ts-ignore */}
@@ -758,12 +852,12 @@ export default function Dashboard() {
                 variant={selectedLanguage === "all" ? "default" : "outline"}
                 className={
                   selectedLanguage === "all"
-                    ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
-                    : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                    ? filterActiveClass
+                    : filterInactiveClass
                 }
                 onClick={() => setSelectedLanguage("all")}
               >
-                全部语言
+                {t("filters.allLang")}
               </Badge>
               {languages.map((lang) => (
                 // @ts-ignore
@@ -772,8 +866,8 @@ export default function Dashboard() {
                   variant={selectedLanguage === lang ? "default" : "outline"}
                   className={
                     selectedLanguage === lang
-                      ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
-                      : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                      ? filterActiveClass
+                      : filterInactiveClass
                   }
                   onClick={() => setSelectedLanguage(lang)}
                 >
@@ -788,12 +882,12 @@ export default function Dashboard() {
                 variant={selectedTag === "all" ? "default" : "outline"}
                 className={
                   selectedTag === "all"
-                    ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
-                    : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                    ? filterActiveClass
+                    : filterInactiveClass
                 }
                 onClick={() => setSelectedTag("all")}
               >
-                全部标签
+                {t("filters.allTag")}
               </Badge>
               {tags.map((tag) => (
                 // @ts-ignore
@@ -802,8 +896,8 @@ export default function Dashboard() {
                   variant={selectedTag === tag ? "default" : "outline"}
                   className={
                     selectedTag === tag
-                      ? "cursor-pointer border border-emerald-400/70 bg-emerald-400 text-[#05220f] shadow-[0_0_12px_rgba(16,255,128,0.35)]"
-                      : "cursor-pointer border border-emerald-600/50 bg-[#0c1d12] text-emerald-100 hover:bg-emerald-500/15"
+                      ? filterActiveClass
+                      : filterInactiveClass
                   }
                   onClick={() => setSelectedTag(tag)}
                 >
@@ -817,11 +911,8 @@ export default function Dashboard() {
 
       <div className="grid gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {visibleRepos.map((repo) => (
-          <Card
-            key={repo.id}
-            className="flex flex-col overflow-hidden hover:shadow-[0_0_20px_rgba(16,255,128,0.22)] transition-shadow border border-emerald-700/50 bg-[#050b07]/80 card-enter"
-          >
-            <CardHeader className="pb-3 bg-[#08130c]/70 border-b border-emerald-800/50">
+          <Card key={repo.id} className={repoCardClass}>
+            <CardHeader className={repoHeaderClass}>
               <div className="flex justify-between items-start gap-2">
                 <CardTitle
                   className="text-base font-semibold leading-tight truncate"
@@ -839,22 +930,42 @@ export default function Dashboard() {
                     </span>
                   </a>
                 </CardTitle>
-                <div className="flex items-center text-muted-foreground text-xs shrink-0 bg-background border px-1.5 py-0.5 rounded-full">
-                  <Star className="w-3 h-3 mr-1 fill-current text-emerald-300" />
-                  <span className="text-emerald-200">
+                <div
+                  className={`flex items-center text-muted-foreground text-xs shrink-0 border px-1.5 py-0.5 rounded-full ${
+                    isDark ? "bg-background" : "bg-muted"
+                  }`}
+                >
+                  <Star
+                    className={`w-3 h-3 mr-1 ${
+                      isDark
+                        ? "fill-current text-emerald-300"
+                        : "text-foreground"
+                    }`}
+                  />
+                  <span
+                    className={isDark ? "text-emerald-200" : "text-foreground"}
+                  >
                     {repo.stargazers_count.toLocaleString()}
                   </span>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col gap-4 p-4">
-              <CardDescription className="line-clamp-2 text-sm min-h-[2.5em] text-emerald-200/80">
+              <CardDescription
+                className={`line-clamp-2 text-sm min-h-[2.5em] ${
+                  isDark ? "text-emerald-200/80" : "text-muted-foreground"
+                }`}
+              >
                 {repo.description || "No description provided."}
               </CardDescription>
 
               {repo.ai_summary && (
-                <div className="text-xs bg-[#0b1f14] text-emerald-100 p-2.5 rounded-md border border-emerald-700/60 shadow-[0_0_10px_rgba(16,255,128,0.12)]">
-                  <span className="font-semibold mr-1 text-emerald-300">
+                <div className={aiSummaryClass}>
+                  <span
+                    className={`font-semibold mr-1 ${
+                      isDark ? "text-emerald-300" : "text-foreground"
+                    }`}
+                  >
                     AI:
                   </span>{" "}
                   {repo.ai_summary}
@@ -864,11 +975,8 @@ export default function Dashboard() {
               <div className="mt-auto pt-2 flex flex-wrap gap-1.5">
                 {repo.language && (
                   // @ts-ignore
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] h-5 px-1.5 font-normal border-emerald-700/70 bg-[#0a1a11] text-emerald-200"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary mr-1.5 opacity-70"></span>
+                  <Badge variant="outline" className={langBadgeClass}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary mr-1.5 opacity-70" />
                     {repo.language}
                   </Badge>
                 )}
@@ -877,7 +985,7 @@ export default function Dashboard() {
                   <Badge
                     key={tag}
                     variant="secondary"
-                    className="text-[10px] h-5 px-1.5 font-normal bg-[#0d1f14] hover:bg-[#112a1c] text-emerald-200 border border-emerald-700/60"
+                    className={tagBadgeClass}
                   >
                     {tag}
                   </Badge>
@@ -886,7 +994,7 @@ export default function Dashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-6 px-2 border-emerald-700/70 text-emerald-200 hover:bg-emerald-500/10"
+                    className={reindexBtnClass}
                     disabled={indexing || syncing || reindexingId === repo.id}
                     onClick={() => handleReindexOne(repo)}
                   >

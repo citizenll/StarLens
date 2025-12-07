@@ -75,9 +75,7 @@ export default function Settings() {
     if (!file) return;
     setTransfering(true);
     try {
-      const text = await file.text();
-      const payload = JSON.parse(text);
-      await backupService.import(payload);
+      await backupService.importBlob(file);
       await loadSettings();
       toast.success('导入完成');
     } catch (err) {

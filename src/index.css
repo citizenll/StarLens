@@ -26,6 +26,28 @@
   --radius-lg: 0.5rem;
 }
 
+:root[data-theme='light'] {
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(140 20% 12%);
+  --color-card: hsl(140 12% 96%);
+  --color-card-foreground: hsl(140 20% 10%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(140 20% 12%);
+  --color-primary: hsl(134 60% 40%);
+  --color-primary-foreground: hsl(0 0% 98%);
+  --color-secondary: hsl(140 18% 92%);
+  --color-secondary-foreground: hsl(140 20% 20%);
+  --color-muted: hsl(140 10% 90%);
+  --color-muted-foreground: hsl(140 15% 40%);
+  --color-accent: hsl(178 55% 45%);
+  --color-accent-foreground: hsl(140 20% 12%);
+  --color-destructive: hsl(2 74% 52%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+  --color-border: hsl(140 12% 75%);
+  --color-input: hsl(140 12% 75%);
+  --color-ring: hsl(134 60% 40%);
+}
+
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
@@ -40,8 +62,8 @@
 body {
   margin: 0;
   padding: var(--safe-top) var(--safe-right) calc(var(--safe-bottom) + 12px) var(--safe-left);
-  background-color: #050505;
-  color: #8efba5;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
   font-family: 'Fira Code', monospace;
   overflow-x: hidden;
   overflow-y: auto;
@@ -130,6 +152,15 @@ input, textarea, button {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #006600;
+}
+:root[data-theme='light'] ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+:root[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+:root[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .glitch-hover:hover {

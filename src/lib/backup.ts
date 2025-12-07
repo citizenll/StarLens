@@ -1,3 +1,4 @@
+import { gzip, ungzip } from 'pako';
 import { db } from './db';
 import type { Repository, SyncState, UserSettings } from '@/types';
 
@@ -63,13 +64,29 @@ export const backupService = {
 
   async download(): Promise<void> {
     const payload = await this.exportAll();
-    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const json = JSON.stringify(payload);
+    const compressed = gzip(json);
+    const blob = new Blob([compressed], { type: 'application/gzip' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `star-agent-backup-${Date.now()}.json`;
+    a.download = `star-agent-backup-${Date.now()}.json.gz`;
     a.click();
     URL.revokeObjectURL(url);
+  },
+
+  async importBlob(file: File) {
+    const buffer = await file.arrayBuffer();
+    let text: string | null = null;
+    try {
+      const decompressed = ungzip(new Uint8Array(buffer), { to: 'string' });
+      text = decompressed as string;
+    } catch (err) {
+      // fallback to plain text
+      text = new TextDecoder().decode(buffer);
+    }
+    const payload = JSON.parse(text) as BackupPayload;
+    return this.import(payload);
   },
 
   async import(payload: BackupPayload) {

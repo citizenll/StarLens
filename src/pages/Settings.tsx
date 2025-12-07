@@ -8,8 +8,10 @@ import { db } from '@/lib/db';
 import { githubService } from '@/lib/github';
 import { aiService } from '@/lib/ai';
 import { backupService } from '@/lib/backup';
+import { useI18n } from '@/lib/i18n';
 
 export default function Settings() {
+  const { t } = useI18n();
   const [githubToken, setGithubToken] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [openaiBase, setOpenaiBase] = useState('');
@@ -90,31 +92,35 @@ export default function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
-        <p className="text-muted-foreground">
-          Manage your API keys and preferences.
-        </p>
+        <h2 className="text-2xl font-bold tracking-tight">{t('settings.title')}</h2>
+        <p className="text-muted-foreground">{t('settings.subtitle')}</p>
       </div>
 
       <div className="grid gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>GitHub Configuration</CardTitle>
-            <CardDescription>
-              Required to fetch your starred repositories.
-            </CardDescription>
+            <CardTitle>{t('settings.github.title')}</CardTitle>
+            <CardDescription>{t('settings.github.desc')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Personal Access Token</label>
+              <label className="text-sm font-medium">{t('settings.github.tokenLabel')}</label>
               <Input 
                 type="password" 
-                placeholder="ghp_..." 
+                placeholder={t('settings.github.tokenPlaceholder')}
                 value={githubToken}
                 onChange={(e) => setGithubToken(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Generate a token with `read:user` scope at GitHub Settings.
+                {t('settings.github.tokenHelp')}{' '}
+                <a
+                  className="underline text-primary"
+                  href="https://github.com/settings/personal-access-tokens/new"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t('settings.github.tokenLink')}
+                </a>
               </p>
             </div>
           </CardContent>
@@ -122,25 +128,23 @@ export default function Settings() {
 
         <Card>
           <CardHeader>
-            <CardTitle>AI Configuration</CardTitle>
-            <CardDescription>
-              Required for semantic search and auto-categorization.
-            </CardDescription>
+            <CardTitle>{t('settings.ai.title')}</CardTitle>
+            <CardDescription>{t('settings.ai.desc')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">OpenAI API Key</label>
+              <label className="text-sm font-medium">{t('settings.ai.keyLabel')}</label>
               <Input 
                 type="password" 
-                placeholder="sk-..." 
+                placeholder={t('settings.ai.keyPlaceholder')}
                 value={openaiKey}
                 onChange={(e) => setOpenaiKey(e.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">API Base URL (Optional)</label>
+              <label className="text-sm font-medium">{t('settings.ai.baseLabel')}</label>
               <Input 
-                placeholder="https://api.openai.com/v1" 
+                placeholder={t('settings.ai.basePlaceholder')}
                 value={openaiBase}
                 onChange={(e) => setOpenaiBase(e.target.value)}
               />
@@ -151,15 +155,15 @@ export default function Settings() {
         <div className="flex justify-end">
           <Button onClick={handleSave} disabled={loading}>
             <Save className="w-4 h-4 mr-2" />
-            Save Changes
+            {t('settings.save')}
           </Button>
         </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Data Transfer</CardTitle>
-          <CardDescription>导出/导入所有数据（设置、仓库、索引快照）。</CardDescription>
+          <CardTitle>{t('settings.data.title')}</CardTitle>
+          <CardDescription>{t('settings.data.desc')}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
           <input
@@ -170,10 +174,10 @@ export default function Settings() {
             onChange={onFileSelected}
           />
           <Button variant="outline" onClick={handleExport} disabled={transfering}>
-            导出数据
+            {t('settings.data.export')}
           </Button>
           <Button onClick={handleImportFile} disabled={transfering}>
-            导入数据
+            {t('settings.data.import')}
           </Button>
         </CardContent>
       </Card>

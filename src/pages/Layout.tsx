@@ -109,14 +109,14 @@ export default function Layout() {
           >
             <img
               src={logo}
-              alt="Star Agent"
+              alt="StarLens"
               className={`h-7 w-7 rounded-md border ${
                 isDark
                   ? "border-emerald-500/60 bg-[#0f2a16] shadow-[0_0_12px_rgba(16,255,128,0.6)]"
                   : "border-border bg-card shadow-sm"
               }`}
             />
-            <span className="uppercase text-xs">Star Agent</span>
+            <span className="uppercase text-xs">StarLens</span>
           </div>
         </div>
 

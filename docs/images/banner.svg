@@ -70,10 +70,10 @@
     </g>
 
     <g transform="translate(0, 30)">
-      <text x="0" y="0" font-size="48" font-weight="bold" fill="url(#textGradient)" letter-spacing="-1">GitHub Star Agent</text>
+      <text x="0" y="0" font-size="48" font-weight="bold" fill="url(#textGradient)" letter-spacing="-1">StarLens</text>
       
       <text x="0" y="40" font-size="18" font-weight="300" fill="#94a3b8">
-        Local-first GitHub Star 管理应用 <tspan fill="#475569" dx="5" dy="-2">.</tspan><tspan dx="5" dy="2"> 向量语义搜索 </tspan><tspan fill="#475569" dx="5" dy="-2">.</tspan><tspan dx="5" dy="2"> AI 智能标签</tspan>
+        Local-first GitHub Star manager <tspan fill="#475569" dx="5" dy="-2">.</tspan><tspan dx="5" dy="2"> semantic vector search </tspan><tspan fill="#475569" dx="5" dy="-2">.</tspan><tspan dx="5" dy="2"> AI tagging</tspan>
       </text>
     </g>
 

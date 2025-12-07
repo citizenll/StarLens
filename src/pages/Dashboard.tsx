@@ -497,6 +497,24 @@ export default function Dashboard() {
         if (!textIds.has(r.id)) merged.push(r as Repository);
       });
 
+      // 优先保证精确 / 前缀匹配的仓库排在最前
+      const rankRepo = (repo: Repository) => {
+        const name = repo.name.toLowerCase();
+        const full = (repo.full_name || "").toLowerCase();
+        const desc = (repo.description || "").toLowerCase();
+        let best = 0;
+        normQueries.forEach((q) => {
+          if (!q) return;
+          if (name === q || full === q) best = Math.max(best, 1000);
+          else if (name.startsWith(q) || full.startsWith(q))
+            best = Math.max(best, 900);
+          else if (name.includes(q) || full.includes(q))
+            best = Math.max(best, 800);
+          else if (desc.includes(q)) best = Math.max(best, 500);
+        });
+        return best;
+      };
+
       if (useAiSearch && useAiRerank && merged.length) {
         try {
           const topCandidates = merged.slice(0, 50);
@@ -523,7 +541,18 @@ export default function Dashboard() {
         }
       }
 
-      setAllRepos(merged.length ? merged : allReposList);
+      const ranked = merged.map((r, idx) => ({
+        repo: r,
+        score: rankRepo(r),
+        idx,
+      }));
+      ranked.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.idx - b.idx;
+      });
+
+      const finalList = ranked.length ? ranked.map((r) => r.repo) : allReposList;
+      setAllRepos(finalList);
       setSelectedLanguage("all");
       setSelectedTag("all");
       setPage(1);
@@ -640,7 +669,7 @@ export default function Dashboard() {
               }`}
             >
               <Sparkles className="w-4 h-4" />
-              AI Star Agent
+              StarLens
             </div>
             <h2
               className={`text-3xl font-semibold mt-1 ${

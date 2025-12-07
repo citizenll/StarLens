@@ -1,45 +1,37 @@
-# GitHub Star Agent
+# StarLens
+
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 <div align="center">
-  <img src="docs/images/banner.png" alt="GitHub Star Agent Banner" width="100%" />
+  <img src="docs/images/banner.svg" alt="StarLens Banner" width="100%" />
 
-<br/>
-
-<!-- 这里可以放你的 Icon 1 -->
-<img src="path/to/icon.svg" alt="Logo" width="80" height="80" />
-
-<h1 align="center">GitHub Star Agent</h1>
-
-<p align="center">
-    Local-first GitHub Star 管理应用 • 向量语义搜索 • AI 智能标签
-  </p>
+  <h1 align="center">StarLens</h1>
+  <p align="center">Local-first GitHub Star manager · semantic vector search · AI tagging</p>
 </div>
-Local-first GitHub star 管理应用：获取你的 starred 仓库，利用 WASM 向量库 LunaVDB + 大模型为仓库生成摘要与标签，支持自然语言语义搜索、过滤与增量同步。
 
-## 功能
+Local-first GitHub Star manager: sync your starred repos, generate AI summaries/tags with a WASM vector engine (LunaVDB), and search with natural language plus filters and incremental sync.
 
-- GitHub PAT/OAuth 登录，增量同步 starred 仓库（仅抓最新几页，自动早停）。
-- 本地 IndexedDB 存储仓库数据；WASM LunaVDB 快照保存在浏览器，重启秒级恢复。
-- AI 生成摘要/标签 + 向量 embedding，支持自然语言搜索。
-- 过滤/排序：语言、标签、最新、Star 数、已索引优先。
-- shadcn UI，卡片化展示，Infinite Scroll。
+## Features
 
-## 快速开始
+- GitHub PAT/OAuth login, incremental star sync (fetch latest pages only, auto stop).
+-,Local IndexedDB storage; WASM LunaVDB snapshot kept in-browser for instant resume.
+- AI summaries/tags + vector embeddings, natural-language search.
+- Filters/sorting: language, tags, latest, star count, indexed-first.
+- shadcn UI, card layout, infinite scroll.
 
-1. `npm install` 然后 `npm run dev` 启动。
-2. 进入 `Settings`：
-   - 填入 GitHub Personal Access Token（最少 `read:user` + `public_repo`
-     即可读取 Stars）。
-   - 填入 OpenAI 兼容 API Key 和可选 Base URL（默认为官方
-     https://api.openai.com/v1）。
-3. 回到 Dashboard：
-   - 点击 `Sync Stars` 拉取最新 Stars（首次全量，后续仅最新几页增量）。
-   - 点击 `Index All` 生成 AI 摘要/标签并向量化，索引进度在顶部显示。
-4. 使用顶部搜索框输入自然语言描述，配合语言/标签筛选与排序快速找到仓库。
+## Quick Start
 
-## 开发说明
+1. `npm install` then `npm run dev`.
+2. Go to **Settings**:
+   - Add GitHub Personal Access Token (at least `read:user` + `public_repo` to read stars).
+   - Add OpenAI-compatible API Key and optional Base URL (default `https://api.openai.com/v1`).
+3. Back to Dashboard:
+   - Click **Sync Stars** to pull stars (full on first run, incremental later).
+   - Click **Index All** to generate AI summaries/tags and vectorize; progress shows at top.
+4. Use the search box with natural language; combine language/tag filters and sorting to find repos fast.
 
-- 技术栈：React + TypeScript + Vite + Dexie + shadcn/ui + LunaVDB (WASM)。
-- 数据表：`repositories`、`syncState`、`settings`、`vectorStore`（包含向量快照与版本号）。
-- 若想重建向量库，可清理 IndexedDB 或 bump `VECTOR_SNAPSHOT_VERSION`
-  后重新索引。
+## Development Notes
+
+- Stack: React + TypeScript + Vite + Dexie + shadcn/ui + LunaVDB (WASM).
+- Tables: `repositories`, `syncState`, `settings`, `vectorStore` (vector snapshot + version).
+- To rebuild vectors, clear IndexedDB or bump `VECTOR_SNAPSHOT_VERSION` and re-index.

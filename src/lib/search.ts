@@ -1,6 +1,14 @@
-import MiniSearch, { type SearchResult } from 'minisearch';
-import { db } from './db';
 import type { Repository } from '@/types';
+import { db } from './db';
+
+type WorkerRequest =
+  | { id: number; type: 'build'; docs: RepoDoc[] }
+  | { id: number; type: 'search'; query: string; limit: number };
+
+type WorkerResponse =
+  | { id: number; type: 'ready' }
+  | { id: number; type: 'searchResult'; ids: number[] }
+  | { id: number; type: 'error'; message: string };
 
 type RepoDoc = {
   id: number;
@@ -13,98 +21,89 @@ type RepoDoc = {
   readme_content?: string;
 };
 
-class MiniSearchService {
-  private mini: MiniSearch<RepoDoc> | null = null;
-  private initialized = false;
+class SearchService {
+  private worker: Worker | null = null;
+  private requestId = 0;
+  private pending = new Map<number, (resp: WorkerResponse) => void>();
+  private initPromise: Promise<void> | null = null;
 
-  private buildInstance() {
-    this.mini = new MiniSearch<RepoDoc>({
-      idField: 'id',
-      fields: ['name', 'full_name', 'description', 'ai_summary', 'ai_tags', 'topics', 'readme_content'],
-      storeFields: ['id'],
-      searchOptions: {
-        combineWith:'OR',
-        boost: { name: 4, full_name: 3, ai_tags: 2, topics: 2, ai_summary: 1.5, description: 1.2 },
-        fuzzy: 0.2,
-        prefix: true,
-      },
+  private ensureWorker() {
+    if (this.worker) return;
+    this.worker = new Worker(new URL('../workers/searchWorker.ts', import.meta.url), { type: 'module' });
+    this.worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
+      const resp = event.data;
+      const resolver = this.pending.get(resp.id);
+      if (resolver) {
+        this.pending.delete(resp.id);
+        resolver(resp);
+      }
     });
   }
 
-  private serializeAndPersist = async () => {
-    if (!this.mini) return;
-    const snapshot = this.mini.toJSON();
-    // @ts-ignore allow dynamic shape
-    await db.syncState.put({ id: 'mini_search', snapshot });
-  };
-
-  async init(forceRebuild = false) {
-    if (this.initialized && !forceRebuild) return;
-    this.buildInstance();
-
-    if (!forceRebuild) {
-      // try to load cached snapshot
-      // @ts-ignore
-      const record = await db.syncState.get('mini_search');
-      if (record?.snapshot) {
-        try {
-          this.mini = MiniSearch.loadJSON(record.snapshot);
-          this.initialized = true;
-          return;
-        } catch (err) {
-          console.warn('Failed to load MiniSearch snapshot, rebuilding', err);
-        }
-      }
-    }
-
-    const repos = await db.repositories.toArray();
-    this.buildInstance();
-    if (!this.mini) return;
-    this.mini.addAll(this.mapReposToDocs(repos));
-    this.initialized = true;
-    await this.serializeAndPersist();
+  private postMessage<T extends WorkerResponse>(msg: WorkerRequest): Promise<T> {
+    this.ensureWorker();
+    return new Promise((resolve) => {
+      this.pending.set(msg.id, resolve as any);
+      this.worker!.postMessage(msg);
+    });
   }
 
-  private mapReposToDocs(repos: Repository[]): RepoDoc[] {
-    return repos.map((r) => ({
-      id: r.id,
-      name: r.name,
-      full_name: r.full_name,
-      description: r.description,
-      ai_summary: r.ai_summary,
-      ai_tags: r.ai_tags,
-      topics: r.topics,
-      readme_content: r.readme_content,
-    }));
+  async init(force = false) {
+    if (this.initPromise && !force) return this.initPromise;
+    this.initPromise = (async () => {
+      const repos = await db.repositories.toArray();
+      const docs = repos.map<RepoDoc>((r) => ({
+        id: r.id,
+        name: r.name,
+        full_name: r.full_name,
+        description: r.description,
+        ai_summary: r.ai_summary,
+        ai_tags: r.ai_tags,
+        topics: r.topics,
+        readme_content: (r.readme_content || '').slice(0, 2000),
+      }));
+      const id = ++this.requestId;
+      const resp = await this.postMessage<WorkerResponse>({ id, type: 'build', docs });
+      if (resp.type === 'error') throw new Error(resp.message);
+    })();
+    return this.initPromise;
   }
 
-  async indexRepo(repo: Repository) {
-    if (!this.initialized) await this.init();
-    if (!this.mini) return;
-    // remove old then add new
-    this.mini.remove(repo.id);
-    this.mini.add(this.mapReposToDocs([repo])[0]);
-    await this.serializeAndPersist();
-  }
-
-  async indexAll() {
+  async reindexAll() {
     await this.init(true);
   }
 
-  async search(query: string, limit = 50) {
-    if (!this.initialized) await this.init();
-    if (!this.mini) return [];
-    const results = this.mini.search(query, {
-      prefix: true,
-      fuzzy: 0.2,
-      boost: { name: 4, full_name: 3, ai_tags: 2, topics: 2, ai_summary: 1.5, description: 1.2 },
-    }) as Array<SearchResult & { id: number }>;
+  async indexRepo(repo: Repository) {
+    await this.init();
+    // incremental: rebuild one doc
+    const doc: RepoDoc = {
+      id: repo.id,
+      name: repo.name,
+      full_name: repo.full_name,
+      description: repo.description,
+      ai_summary: repo.ai_summary,
+      ai_tags: repo.ai_tags,
+      topics: repo.topics,
+      readme_content: (repo.readme_content || '').slice(0, 2000),
+    };
+    const id = ++this.requestId;
+    await this.postMessage<WorkerResponse>({ id, type: 'build', docs: [doc] });
+  }
 
-    const ids = results.slice(0, limit).map((r) => r.id);
+  async search(query: string, limit = 50) {
+    await this.init();
+    const id = ++this.requestId;
+    const resp = await this.postMessage<WorkerResponse>({ id, type: 'search', query, limit });
+    if (resp.type === 'error') {
+      console.error('Search worker error', resp.message);
+      return [];
+    }
+    const ids = resp.type === 'searchResult' ? resp.ids : [];
+    if (!ids.length) return [];
     const repos = await db.repositories.where('id').anyOf(ids).toArray();
-    const repoMap = new Map(repos.map((r) => [r.id, r]));
-    return ids.map((id) => repoMap.get(id)).filter(Boolean);
+    const map = new Map(repos.map((r) => [r.id, r]));
+    return ids.map((rid) => map.get(rid)).filter(Boolean) as Repository[];
   }
 }
 
-export const searchService = new MiniSearchService();
+export const searchService = new SearchService();

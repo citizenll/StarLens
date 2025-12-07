@@ -156,11 +156,10 @@ export default function Dashboard() {
         total
       );
       successCount += result.success;
-      processed += repos.length;
-      remaining = remaining.slice(repos.length);
+      processed += batchIds.length;
+      remaining = remaining.slice(batchIds.length);
 
       // persist progress
-      // @ts-ignore
       await db.syncState.put({
         id: "index_job",
         queue: remaining,
@@ -174,7 +173,6 @@ export default function Dashboard() {
     }
 
     // clear job
-    // @ts-ignore
     await db.syncState.delete("index_job");
     setResumeJob(null);
     setIndexing(false);
@@ -213,9 +211,8 @@ export default function Dashboard() {
   };
 
   const checkPendingJob = async () => {
-    // @ts-ignore
-    const job = (await db.syncState.get("index_job")) as any;
-    if (job && job.queue?.length) {
+    const job = await db.syncState.get("index_job");
+    if (job && job.queue && job.queue.length > 0) {
       setResumeJob({
         queue: job.queue,
         done: job.done || 0,
@@ -401,7 +398,6 @@ export default function Dashboard() {
 
       toast.info(`Indexing ${unindexed.length} repositories...`);
       // Save job
-      // @ts-ignore
       await db.syncState.put({
         id: "index_job",
         queue: unindexed.map((r) => r.id),

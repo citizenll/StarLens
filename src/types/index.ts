@@ -38,9 +38,12 @@ export interface Repository {
 }
 
 export interface SyncState {
-  id: string; // 'github_sync'
-  last_synced_at: string;
-  last_page: number;
+  id: string; // 'github_sync' | 'index_job'
+  last_synced_at?: string;
+  last_page?: number;
+  queue?: number[];
+  done?: number;
+  total?: number;
 }
 
 export interface UserSettings {

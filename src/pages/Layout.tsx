@@ -6,6 +6,7 @@ import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { githubService } from '@/lib/github';
 import { db } from '@/lib/db';
+import logo from '@/assets/logo.svg';
 
 export default function Layout() {
   const location = useLocation();
@@ -61,9 +62,7 @@ export default function Layout() {
       <aside className="hidden lg:flex w-[250px] border-r border-emerald-600/40 bg-[#0a120a]/80 backdrop-blur-sm flex-col fixed inset-y-0 left-0 z-10 shadow-[0_0_24px_rgba(16,255,128,0.15)]">
         <div className="p-4 h-14 flex items-center border-b border-emerald-700/40 px-6">
           <div className="flex items-center gap-2 font-semibold tracking-wide text-emerald-100">
-            <div className="h-7 w-7 rounded-md border border-emerald-500/60 bg-[#0f2a16] text-primary-foreground flex items-center justify-center shadow-[0_0_12px_rgba(16,255,128,0.6)]">
-              <Github className="h-4 w-4" />
-            </div>
+            <img src={logo} alt="Star Agent" className="h-7 w-7 rounded-md border border-emerald-500/60 bg-[#0f2a16] shadow-[0_0_12px_rgba(16,255,128,0.6)]" />
             <span className="uppercase text-xs">Star Agent</span>
           </div>
         </div>

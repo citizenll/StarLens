@@ -1016,15 +1016,15 @@ export default function Dashboard() {
             <div className="bg-muted rounded-full p-4 mb-4">
               <Star className="w-8 h-8 text-muted-foreground" />
             </div>
-            <h3 className="text-lg font-semibold">No repositories found</h3>
+            <h3 className="text-lg font-semibold">{t("empty.title")}</h3>
             <p className="text-muted-foreground max-w-sm mt-2">
-              Try syncing your stars from GitHub or adjusting your search query.
+              {t("empty.desc")}
             </p>
             <Button onClick={handleSync} className="mt-6" disabled={syncing}>
               <RefreshCw
                 className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`}
               />
-              Sync Now
+              {t("empty.cta")}
             </Button>
           </div>
         )}

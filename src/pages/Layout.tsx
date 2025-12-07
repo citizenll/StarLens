@@ -197,8 +197,6 @@ export default function Layout() {
       <main className="flex-1 lg:ml-[250px] flex flex-col min-h-screen bg-transparent">
         <header className={`h-14 border-b border-border bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/80 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-10 ${isDark ? "shadow-[0_0_16px_rgba(16,255,128,0.08)]" : "shadow-sm"}`}>
           <div className={`flex items-center gap-2 text-sm ${isDark ? "text-emerald-300/80" : "text-foreground/80"}`}>
-            <span className={`font-semibold ${isDark ? "text-emerald-200" : "text-foreground"}`}>{t("app.title")}</span>
-            <span>/</span>
             <span className="uppercase tracking-[0.14em] text-xs">
               {location.pathname === "/"
                 ? t("nav.dashboard")

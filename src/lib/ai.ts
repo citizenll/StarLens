@@ -124,6 +124,68 @@ Readme: ${r.readme.slice(0, 1200)}`
       for (let i = 0; i < dim; i++) vec[i] /= norm;
       return Array.from(vec);
   }
+
+  async rankRepositories(
+    query: string,
+    repos: Array<{ id: number; name: string; full_name: string; description?: string | null; ai_summary?: string | null; ai_tags?: string[] }>
+  ) {
+    if (!this.openai) throw new Error('AI client not initialized');
+    if (repos.length === 0) return [];
+
+    const prompt = `
+你是代码助手，请根据用户查询对候选仓库排序，输出前10个仓库的 id（数字）按相关性从高到低。
+用户查询: "${query}"
+
+候选仓库:
+${repos.map(r => `- id:${r.id}, name:${r.name}, full:${r.full_name}, desc:${r.description || ''}, summary:${r.ai_summary || ''}, tags:${(r.ai_tags || []).join(',')}`).join('\n')}
+
+输出JSON: {"ids":[id1,id2,...]}
+    `.trim();
+
+    const completion = await this.openai.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'deepseek-chat',
+      response_format: { type: 'json_object' }
+    });
+
+    const content = completion.choices[0].message.content;
+    if (!content) return [];
+
+    try {
+      const parsed = JSON.parse(content) as { ids: Array<number | string> };
+      return parsed.ids?.map(id => Number(id)).filter(n => !Number.isNaN(n)) || [];
+    } catch (e) {
+      console.error('Failed to parse rankRepositories response', e);
+      return [];
+    }
+  }
+
+  async rewriteSearchQuery(query: string) {
+    if (!this.openai) return null;
+    const prompt = `
+你是搜索意图理解器。将用户输入改写为简短关键词（英文/拼音优先），并给出必含的关键短语。
+用户输入: "${query}"
+输出JSON: {"keywords":["k1","k2",...], "must":["phrase1","phrase2",...]}
+    `.trim();
+
+    try {
+      const completion = await this.openai.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'deepseek-chat',
+        response_format: { type: 'json_object' }
+      });
+      const content = completion.choices[0].message.content;
+      if (!content) return null;
+      const parsed = JSON.parse(content) as { keywords?: string[]; must?: string[] };
+      return {
+        keywords: (parsed.keywords || []).filter(Boolean),
+        must: (parsed.must || []).filter(Boolean)
+      };
+    } catch (err) {
+      console.error('rewriteSearchQuery failed', err);
+      return null;
+    }
+  }
 }
 
 export const aiService = new AIService();

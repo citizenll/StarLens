@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { db } from '@/lib/db';
 import { githubService } from '@/lib/github';
 import { vectorService } from '@/lib/vector';
+import { searchService } from '@/lib/search';
 import { aiService } from '@/lib/ai';
 import type { Repository } from '@/types';
 
@@ -31,28 +32,33 @@ export default function Dashboard() {
   const [indexing, setIndexing] = useState(false);
   const [reindexingId, setReindexingId] = useState<number | null>(null);
   const [resumeJob, setResumeJob] = useState<{ queue: number[]; done: number; total: number } | null>(null);
+  const [useAiSearch, setUseAiSearch] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [inputLocked, setInputLocked] = useState(false);
   const processingRef = useRef(false);
   const [indexingProgress, setIndexingProgress] = useState({ current: 0, total: 0 });
   const [stats, setStats] = useState({ total: 0, indexed: 0 });
 
-  // Debounce search
+  // Debounce search (AI 模式仅回车触发，不跟随输入)
   useEffect(() => {
+    if (useAiSearch) return;
     const timer = setTimeout(() => {
       if (searchQuery.trim()) {
         performSearch(searchQuery);
       } else {
-        // Reset to all repos if search is cleared
         loadRepos();
       }
     }, 500);
-
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, useAiSearch]);
 
   useEffect(() => {
     loadRepos();
     checkServices();
     checkPendingJob();
+    // warm up search engines (non-blocking)
+    void searchService.init();
+    void vectorService.init();
   }, []);
 
   // Apply filters and sorting whenever base data or filters change
@@ -336,34 +342,85 @@ export default function Dashboard() {
 
   const performSearch = async (query: string) => {
     try {
-      const vectorResults = await vectorService.search(query);
-      const vectorIds = new Set((vectorResults as Repository[]).map(r => r.id));
+      setSearchLoading(true);
+      if (useAiSearch) setInputLocked(true);
+      const baseQueries = [query];
+      if (useAiSearch) {
+        try {
+          const rewrite = await aiService.rewriteSearchQuery(query);
+          if (rewrite?.keywords?.length) baseQueries.push(rewrite.keywords.join(' '));
+          if (rewrite?.must?.length) baseQueries.push(rewrite.must.join(' '));
+        } catch (err) {
+          console.error('rewrite search failed', err);
+        }
+      }
 
-      // keyword fallback over DB
-      const all = await db.repositories.toArray();
-      const q = query.toLowerCase();
-      const keywordMatches = all.filter(r =>
-        r.name.toLowerCase().includes(q) ||
-        (r.full_name && r.full_name.toLowerCase().includes(q)) ||
-        (r.description && r.description.toLowerCase().includes(q)) ||
-        (r.ai_summary && r.ai_summary.toLowerCase().includes(q)) ||
-        (r.ai_tags && r.ai_tags.some(t => t.toLowerCase().includes(q))) ||
-        (r.readme_content && r.readme_content.toLowerCase().includes(q))
-      );
+      // collect text results across queries
+      const textResults: Repository[] = [];
+      const seenIds = new Set<number>();
+      for (const q of baseQueries) {
+        const res = await searchService.search(q, 100);
+        (res as Repository[]).forEach(r => {
+          if (!seenIds.has(r.id)) {
+            textResults.push(r);
+            seenIds.add(r.id);
+          }
+        });
+      }
 
-      // merge, keep vector order first, then keyword matches not already in vector
-      const merged: Repository[] = [];
-      (vectorResults as Repository[]).forEach(r => merged.push(r));
-      keywordMatches.forEach(r => {
-        if (!vectorIds.has(r.id)) merged.push(r);
+      // ensure exact/substring match on name/full_name is included
+      const allReposList = await db.repositories.toArray();
+      const normQueries = baseQueries.map(q => q.toLowerCase());
+      allReposList.forEach(r => {
+        const name = r.name.toLowerCase();
+        const full = (r.full_name || '').toLowerCase();
+        if (normQueries.some(q => q && (name.includes(q) || full.includes(q)))) {
+          if (!seenIds.has(r.id)) {
+            textResults.push(r);
+            seenIds.add(r.id);
+          }
+        }
       });
 
-      setAllRepos(merged);
+      const textIds = new Set(textResults.map(r => r.id));
+      const vectorResults = await vectorService.search(query, 30);
+
+      let merged: Repository[] = [];
+      textResults.forEach(r => merged.push(r));
+      (vectorResults as Repository[]).forEach(r => {
+        if (!textIds.has(r.id)) merged.push(r as Repository);
+      });
+
+      if (useAiSearch && merged.length) {
+        try {
+          const topCandidates = merged.slice(0, 50);
+          const ids = await aiService.rankRepositories(query, topCandidates.map(r => ({
+            id: r.id,
+            name: r.name,
+            full_name: r.full_name,
+            description: r.description,
+            ai_summary: r.ai_summary,
+            ai_tags: r.ai_tags
+          })));
+          if (ids.length) {
+            const map = new Map<number, Repository>();
+            topCandidates.forEach(r => map.set(r.id, r));
+            merged = ids.map(id => map.get(id)).filter(Boolean) as Repository[];
+          }
+        } catch (err) {
+          console.error('AI rerank failed', err);
+        }
+      }
+
+      setAllRepos(merged.length ? merged : allReposList);
       setSelectedLanguage('all');
       setSelectedTag('all');
       setPage(1);
     } catch (error) {
       toast.error('Search failed');
+    } finally {
+      setSearchLoading(false);
+      setInputLocked(false);
     }
   };
 
@@ -455,8 +512,24 @@ export default function Dashboard() {
                 placeholder="用自然语言搜索：'react 状态管理' / '机器学习可视化' ..." 
                 className="pl-10 h-11 bg-[#050c07] border border-emerald-700/60 text-emerald-100 placeholder:text-emerald-300/50"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  if (inputLocked) return;
+                  setSearchQuery(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (searchQuery.trim()) performSearch(searchQuery);
+                  }
+                }}
+                disabled={inputLocked}
               />
+              {searchLoading && (
+                <div className="absolute right-3 top-3 text-xs text-emerald-300 animate-pulse">Searching…</div>
+              )}
+              {!searchLoading && (
+                <div className="absolute right-3 top-3 text-xs text-emerald-300/80 pointer-events-none">↩︎</div>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               {/* @ts-ignore */}
@@ -470,6 +543,10 @@ export default function Dashboard() {
               {/* @ts-ignore */}
               <Button variant={sortBy === 'indexed' ? 'default' : 'outline'} size="sm" onClick={() => setSortBy('indexed')} className="border border-emerald-600/40">
                 <ArrowUpWideNarrow className="w-4 h-4 mr-1" /> 已索引优先
+              </Button>
+              {/* @ts-ignore */}
+              <Button variant={useAiSearch ? 'default' : 'outline'} size="sm" onClick={() => setUseAiSearch(v => !v)} className="border border-emerald-600/40">
+                <Sparkles className="w-4 h-4 mr-1" /> AI 搜索
               </Button>
             </div>
           </div>

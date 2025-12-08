@@ -35,3 +35,7 @@ Local-first GitHub Star manager: sync your starred repos, generate AI summaries/
 - Stack: React + TypeScript + Vite + Dexie + shadcn/ui + LunaVDB (WASM).
 - Tables: `repositories`, `syncState`, `settings`, `vectorStore` (vector snapshot + version).
 - To rebuild vectors, clear IndexedDB or bump `VECTOR_SNAPSHOT_VERSION` and re-index.
+
+<div align="center">
+  <img src="docs/images/buy-me-a-coffee.png" alt="Buy me a coffee" />
+</div>

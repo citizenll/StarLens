@@ -35,7 +35,3 @@ Local-first GitHub star 管理应用：获取你的 starred 仓库，利用 WASM
 - 技术栈：React + TypeScript + Vite + Dexie + shadcn/ui + LunaVDB (WASM)。
 - 数据表：`repositories`、`syncState`、`settings`、`vectorStore`（包含向量快照与版本号）。
 - 若想重建向量库，可清理 IndexedDB 或 bump `VECTOR_SNAPSHOT_VERSION` 后重新索引。
-
-<div align="center">
-  <img src="docs/images/buy-me-a-coffee.png" alt="Buy me a coffee" />
-</div>

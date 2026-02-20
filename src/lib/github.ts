@@ -55,7 +55,7 @@ export class GitHubService {
       }
 
       const newRepos: Repository[] = [];
-      
+
       for (const item of repos) {
         // @ts-ignore - The type definition for listReposStarredByAuthenticatedUser is tricky with custom headers
         const repo = item.repo || item;
@@ -109,7 +109,8 @@ export class GitHubService {
             ai_tags: existing.ai_tags,
             embedding: existing.embedding,
             readme_content: existing.readme_content
-          } : {})
+          } : {}),
+          starred_at: starredAt,
         };
 
         newRepos.push(mappedRepo);

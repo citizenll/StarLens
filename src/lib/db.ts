@@ -9,7 +9,7 @@ export class StarAgentDB extends Dexie {
   constructor() {
     super('StarAgentDB');
     this.version(1).stores({
-      repositories: 'id, full_name, language, *topics, *ai_tags, created_at, updated_at',
+      repositories: 'id, full_name, language, *topics, *ai_tags, created_at, updated_at, starred_at',
       syncState: 'id',
       settings: 'id',
       vectorStore: 'id' // For storing VDB snapshots

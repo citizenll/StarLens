@@ -35,6 +35,7 @@ export interface Repository {
   ai_tags?: string[];
   embedding?: number[];
   last_synced_at?: string;
+  starred_at?: string;
 }
 
 export interface SyncState {

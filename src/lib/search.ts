@@ -1,13 +1,26 @@
 import type { Repository } from '@/types';
 import { db } from './db';
 
+export type SearchMode = 'broad' | 'balanced' | 'strict';
+
+type SearchHit = {
+  id: number;
+  score: number;
+};
+
+export type ScoredRepo = {
+  repo: Repository;
+  score: number;
+  rank: number;
+};
+
 type WorkerRequest =
-  | { id: number; type: 'build'; docs: RepoDoc[] }
-  | { id: number; type: 'search'; query: string; limit: number };
+  | { id: number; type: 'build'; docs: RepoDoc[]; reset?: boolean }
+  | { id: number; type: 'search'; query: string; limit: number; mode?: SearchMode };
 
 type WorkerResponse =
   | { id: number; type: 'ready' }
-  | { id: number; type: 'searchResult'; ids: number[] }
+  | { id: number; type: 'searchResult'; ids: number[]; hits: SearchHit[] }
   | { id: number; type: 'error'; message: string };
 
 type RepoDoc = {
@@ -63,7 +76,7 @@ class SearchService {
         readme_content: (r.readme_content || '').slice(0, 2000),
       }));
       const id = ++this.requestId;
-      const resp = await this.postMessage<WorkerResponse>({ id, type: 'build', docs });
+      const resp = await this.postMessage<WorkerResponse>({ id, type: 'build', docs, reset: true });
       if (resp.type === 'error') throw new Error(resp.message);
     })();
     return this.initPromise;
@@ -87,22 +100,39 @@ class SearchService {
       readme_content: (repo.readme_content || '').slice(0, 2000),
     };
     const id = ++this.requestId;
-    await this.postMessage<WorkerResponse>({ id, type: 'build', docs: [doc] });
+    await this.postMessage<WorkerResponse>({ id, type: 'build', docs: [doc], reset: false });
   }
 
-  async search(query: string, limit = 50) {
+  async searchScored(query: string, options?: { limit?: number; mode?: SearchMode }) {
+    const limit = options?.limit ?? 50;
+    const mode = options?.mode ?? 'balanced';
+    if (!query.trim()) return [] as ScoredRepo[];
+
     await this.init();
     const id = ++this.requestId;
-    const resp = await this.postMessage<WorkerResponse>({ id, type: 'search', query, limit });
+    const resp = await this.postMessage<WorkerResponse>({ id, type: 'search', query, limit, mode });
     if (resp.type === 'error') {
       console.error('Search worker error', resp.message);
       return [];
     }
-    const ids = resp.type === 'searchResult' ? resp.ids : [];
-    if (!ids.length) return [];
+    const hits = resp.type === 'searchResult' ? resp.hits : [];
+    if (!hits.length) return [];
+
+    const ids = hits.map((h) => h.id);
     const repos = await db.repositories.where('id').anyOf(ids).toArray();
     const map = new Map(repos.map((r) => [r.id, r]));
-    return ids.map((rid) => map.get(rid)).filter(Boolean) as Repository[];
+    return hits
+      .map((hit, rank) => {
+        const repo = map.get(hit.id);
+        if (!repo) return null;
+        return { repo, score: hit.score, rank };
+      })
+      .filter((item): item is ScoredRepo => item !== null);
+  }
+
+  async search(query: string, limit = 50) {
+    const scored = await this.searchScored(query, { limit, mode: 'balanced' });
+    return scored.map((item) => item.repo);
   }
 }
 

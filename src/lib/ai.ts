@@ -127,13 +127,14 @@ Readme: ${r.readme.slice(0, 1200)}`
 
   async rankRepositories(
     query: string,
-    repos: Array<{ id: number; name: string; full_name: string; description?: string | null; ai_summary?: string | null; ai_tags?: string[] }>
+    repos: Array<{ id: number; name: string; full_name: string; description?: string | null; ai_summary?: string | null; ai_tags?: string[] }>,
+    maxResults = 10
   ) {
     if (!this.openai) throw new Error('AI client not initialized');
     if (repos.length === 0) return [];
 
     const prompt = `
-你是代码助手，请根据用户查询对候选仓库排序，输出前10个仓库的 id（数字）按相关性从高到低。
+你是代码助手，请根据用户查询对候选仓库排序，输出最相关的前 ${maxResults} 个仓库 id（数字）按相关性从高到低。
 用户查询: "${query}"
 
 候选仓库:
@@ -153,7 +154,18 @@ ${repos.map(r => `- id:${r.id}, name:${r.name}, full:${r.full_name}, desc:${r.de
 
     try {
       const parsed = JSON.parse(content) as { ids: Array<number | string> };
-      return parsed.ids?.map(id => Number(id)).filter(n => !Number.isNaN(n)) || [];
+      const allowSet = new Set(repos.map((r) => r.id));
+      const unique: number[] = [];
+      const seen = new Set<number>();
+      (parsed.ids || []).forEach((id) => {
+        const normalized = Number(id);
+        if (Number.isNaN(normalized)) return;
+        if (!allowSet.has(normalized)) return;
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+        unique.push(normalized);
+      });
+      return unique.slice(0, Math.max(1, maxResults));
     } catch (e) {
       console.error('Failed to parse rankRepositories response', e);
       return [];

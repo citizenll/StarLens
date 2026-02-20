@@ -5,6 +5,7 @@ import {
   Search,
   Star,
   Sparkles,
+  Info,
   SlidersHorizontal,
   Clock3,
   ArrowUpWideNarrow,
@@ -29,7 +30,7 @@ import {
 import { db } from "@/lib/db";
 import { githubService } from "@/lib/github";
 import { vectorService } from "@/lib/vector";
-import { searchService } from "@/lib/search";
+import { searchService, type SearchMode } from "@/lib/search";
 import { aiService } from "@/lib/ai";
 import { useThemeMode } from "@/lib/theme";
 import { useI18n } from "@/lib/i18n";
@@ -40,6 +41,62 @@ const README_CONCURRENCY = 3;
 const INDEX_CONCURRENCY = 3;
 const AI_BATCH_SIZE = 4;
 const INDEX_BATCH_SIZE = 6;
+const STAGE1_MAX_CANDIDATES = 30000;
+const STAGE2_TOP_K = 117;
+const STAGE3_TOP_K = 117;
+
+type CandidateState = {
+  repo: Repository;
+  stage1Score: number;
+  hardPriority: number;
+  titleScore: number;
+  descScore: number;
+  readmeScore: number;
+  codeScore: number;
+  lexicalScore: number;
+  semanticScore: number;
+  blendedScore: number;
+  aiRank: number;
+  firstSeen: number;
+};
+
+type SearchExplainEntry = {
+  hardPriority: number;
+  titleScore: number;
+  descScore: number;
+  readmeScore: number;
+  codeScore: number;
+  stage1Score: number;
+  blendedScore: number;
+  aiRank: number | null;
+};
+
+const normalizeText = (value: string) =>
+  value.toLowerCase().replace(/\s+/g, " ").trim();
+
+const tokenize = (value: string) =>
+  normalizeText(value)
+    .split(/[^\p{L}\p{N}#+._-]+/u)
+    .filter((token) => token.length > 1 || /[\u4e00-\u9fff]/u.test(token));
+
+const dotProduct = (a: number[], b: number[]) => {
+  const len = Math.min(a.length, b.length);
+  let sum = 0;
+  for (let i = 0; i < len; i++) sum += a[i] * b[i];
+  return sum;
+};
+
+const compareCandidates = (a: CandidateState, b: CandidateState) => {
+  if (a.hardPriority !== b.hardPriority) return a.hardPriority - b.hardPriority;
+  if (b.titleScore !== a.titleScore) return b.titleScore - a.titleScore;
+  if (b.descScore !== a.descScore) return b.descScore - a.descScore;
+  if (b.readmeScore !== a.readmeScore) return b.readmeScore - a.readmeScore;
+  if (b.codeScore !== a.codeScore) return b.codeScore - a.codeScore;
+  if (a.aiRank !== b.aiRank) return a.aiRank - b.aiRank;
+  if (b.blendedScore !== a.blendedScore) return b.blendedScore - a.blendedScore;
+  if (b.stage1Score !== a.stage1Score) return b.stage1Score - a.stage1Score;
+  return a.firstSeen - b.firstSeen;
+};
 
 export default function Dashboard() {
   const { t, lang } = useI18n();
@@ -65,6 +122,10 @@ export default function Dashboard() {
   const [useAiSearch, setUseAiSearch] = useState(false);
   const [useAiRerank, setUseAiRerank] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [showSearchExplain, setShowSearchExplain] = useState(false);
+  const [searchExplainMap, setSearchExplainMap] = useState<
+    Record<number, SearchExplainEntry>
+  >({});
   const [inputLocked, setInputLocked] = useState(false);
   const processingRef = useRef(false);
   const [indexingProgress, setIndexingProgress] = useState({
@@ -108,6 +169,11 @@ export default function Dashboard() {
         return matchLanguage && matchTag;
       })
       .sort((a, b) => {
+        if (searchQuery.trim() && sortBy === "recent") {
+          const scoreA = a.score || 0;
+          const scoreB = b.score || 0;
+          if (scoreA !== scoreB) return scoreB - scoreA;
+        }
         if (sortBy === "stars")
           return (b.stargazers_count || 0) - (a.stargazers_count || 0);
         if (sortBy === "indexed") {
@@ -115,14 +181,14 @@ export default function Dashboard() {
           const bIndexed = b.embedding ? 1 : 0;
           if (aIndexed !== bIndexed) return bIndexed - aIndexed;
         }
-        return (
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        const timeA = a.starred_at ? new Date(a.starred_at).getTime() : new Date(a.created_at).getTime();
+        const timeB = b.starred_at ? new Date(b.starred_at).getTime() : new Date(b.created_at).getTime();
+        return timeB - timeA;
       });
 
     setFilteredRepos(filtered);
     setPage(1);
-  }, [allRepos, selectedLanguage, selectedTag, sortBy]);
+  }, [allRepos, selectedLanguage, selectedTag, sortBy, searchQuery]);
 
   // Pagination effect
   useEffect(() => {
@@ -201,11 +267,14 @@ export default function Dashboard() {
   };
 
   const loadRepos = async () => {
-    const repos = await db.repositories
-      .orderBy("created_at")
-      .reverse()
-      .toArray();
+    const repos = await db.repositories.toArray();
+    repos.sort((a, b) => {
+      const timeA = a.starred_at ? new Date(a.starred_at).getTime() : new Date(a.created_at).getTime();
+      const timeB = b.starred_at ? new Date(b.starred_at).getTime() : new Date(b.created_at).getTime();
+      return timeB - timeA;
+    });
     setAllRepos(repos);
+    setSearchExplainMap({});
     setPage(1); // Reset pagination
 
     // Calculate stats
@@ -445,118 +514,377 @@ export default function Dashboard() {
 
   const performSearch = async (query: string) => {
     try {
+      const rawQuery = query.trim();
+      if (!rawQuery) {
+        setSearchExplainMap({});
+        await loadRepos();
+        return;
+      }
+
       setSearchLoading(true);
       if (useAiSearch) setInputLocked(true);
-      const baseQueries = [query];
+      const allReposSnapshot = await db.repositories.toArray();
+
+      let rewrite: { keywords?: string[]; must?: string[] } | null = null;
       if (useAiSearch) {
         try {
-          const rewrite = await aiService.rewriteSearchQuery(query);
-          if (rewrite?.keywords?.length)
-            baseQueries.push(rewrite.keywords.join(" "));
-          if (rewrite?.must?.length) baseQueries.push(rewrite.must.join(" "));
+          rewrite = await aiService.rewriteSearchQuery(rawQuery);
         } catch (err) {
           console.error("rewrite search failed", err);
         }
       }
 
-      // collect text results across queries
-      const textResults: Repository[] = [];
-      const seenIds = new Set<number>();
-      for (const q of baseQueries) {
-        const res = await searchService.search(q, 100);
-        (res as Repository[]).forEach((r) => {
-          if (!seenIds.has(r.id)) {
-            textResults.push(r);
-            seenIds.add(r.id);
-          }
-        });
-      }
+      const originalQuery = normalizeText(rawQuery);
+      const queryVariants = Array.from(
+        new Set(
+          [
+            originalQuery,
+            tokenize(rawQuery).slice(0, 6).join(" "),
+            ...(rewrite?.keywords || []),
+            ...(rewrite?.must || []),
+          ]
+            .map((q) => normalizeText(q || ""))
+            .filter(Boolean)
+        )
+      ).slice(0, 12);
 
-      // ensure exact/substring match on name/full_name is included
-      const allReposList = await db.repositories.toArray();
-      const normQueries = baseQueries.map((q) => q.toLowerCase());
-      allReposList.forEach((r) => {
-        const name = r.name.toLowerCase();
-        const full = (r.full_name || "").toLowerCase();
-        if (
-          normQueries.some((q) => q && (name.includes(q) || full.includes(q)))
-        ) {
-          if (!seenIds.has(r.id)) {
-            textResults.push(r);
-            seenIds.add(r.id);
-          }
+      const queryTokens = Array.from(
+        new Set([
+          ...tokenize(originalQuery),
+          ...(rewrite?.keywords || []).flatMap((item) => tokenize(item)),
+          ...(rewrite?.must || []).flatMap((item) => tokenize(item)),
+        ])
+      ).slice(0, 24);
+
+      const retrievalPlan: Array<{
+        query: string;
+        mode: SearchMode;
+        limit: number;
+        weight: number;
+      }> = [
+        { query: originalQuery, mode: "strict", limit: 600, weight: 2.4 },
+        { query: originalQuery, mode: "balanced", limit: 1800, weight: 1.9 },
+        { query: originalQuery, mode: "broad", limit: 5000, weight: 1.3 },
+      ];
+
+      queryVariants.forEach((variant, idx) => {
+        if (variant === originalQuery) return;
+        retrievalPlan.push({
+          query: variant,
+          mode: "broad",
+          limit: idx < 4 ? 2200 : 1200,
+          weight: idx < 4 ? 1.05 : 0.75,
+        });
+      });
+
+      const seenPlan = new Set<string>();
+      const finalPlan = retrievalPlan.filter((item) => {
+        const key = `${item.mode}::${item.query}`;
+        if (seenPlan.has(key)) return false;
+        seenPlan.add(key);
+        return true;
+      });
+
+      const [textBatchResults, vectorResults] = await Promise.all([
+        Promise.all(
+          finalPlan.map(async (plan) => ({
+            plan,
+            hits: await searchService.searchScored(plan.query, {
+              limit: plan.limit,
+              mode: plan.mode,
+            }),
+          }))
+        ),
+        vectorService.search(rawQuery, 500) as Promise<
+          Array<Repository & { _distance?: number }>
+        >,
+      ]);
+
+      const candidateMap = new Map<number, CandidateState>();
+      const vectorSimMap = new Map<number, number>();
+      let seenOrder = 0;
+
+      const upsertCandidate = (repo: Repository, scoreDelta: number) => {
+        const current = candidateMap.get(repo.id);
+        if (!current) {
+          candidateMap.set(repo.id, {
+            repo,
+            stage1Score: scoreDelta,
+            hardPriority: 99,
+            titleScore: 0,
+            descScore: 0,
+            readmeScore: 0,
+            codeScore: 0,
+            lexicalScore: 0,
+            semanticScore: 0,
+            blendedScore: 0,
+            aiRank: Number.MAX_SAFE_INTEGER,
+            firstSeen: seenOrder++,
+          });
+          return;
         }
-      });
-
-      const textIds = new Set(textResults.map((r) => r.id));
-      const vectorResults = await vectorService.search(query, 30);
-
-      let merged: Repository[] = [];
-      textResults.forEach((r) => merged.push(r));
-      (vectorResults as Repository[]).forEach((r) => {
-        if (!textIds.has(r.id)) merged.push(r as Repository);
-      });
-
-      // 优先保证精确 / 前缀匹配的仓库排在最前
-      const rankRepo = (repo: Repository) => {
-        const name = repo.name.toLowerCase();
-        const full = (repo.full_name || "").toLowerCase();
-        const desc = (repo.description || "").toLowerCase();
-        let best = 0;
-        normQueries.forEach((q) => {
-          if (!q) return;
-          if (name === q || full === q) best = Math.max(best, 1000);
-          else if (name.startsWith(q) || full.startsWith(q))
-            best = Math.max(best, 900);
-          else if (name.includes(q) || full.includes(q))
-            best = Math.max(best, 800);
-          else if (desc.includes(q)) best = Math.max(best, 500);
-        });
-        return best;
+        current.stage1Score += scoreDelta;
       };
 
-      if (useAiSearch && useAiRerank && merged.length) {
+      textBatchResults.forEach(({ plan, hits }) => {
+        const topScore = hits[0]?.score || 1;
+        const total = Math.max(hits.length, 1);
+        hits.forEach((hit) => {
+          const normalized = topScore > 0 ? hit.score / topScore : 0;
+          const rankQuality = 1 - hit.rank / total;
+          const weightedScore =
+            plan.weight * (normalized * 0.75 + rankQuality * 0.25);
+          upsertCandidate(hit.repo, weightedScore);
+        });
+      });
+
+      allReposSnapshot.forEach((repo) => {
+        const name = normalizeText(repo.name);
+        const full = normalizeText(repo.full_name || "");
+        let boost = 0;
+        if (name === originalQuery || full === originalQuery) boost = 3.5;
+        else if (
+          name.startsWith(originalQuery) ||
+          full.startsWith(originalQuery)
+        ) {
+          boost = 2.6;
+        } else {
+          for (const variant of queryVariants) {
+            if (
+              variant &&
+              (name.includes(variant) || full.includes(variant))
+            ) {
+              boost = Math.max(boost, 1.6);
+              break;
+            }
+          }
+        }
+        if (boost > 0) upsertCandidate(repo, boost);
+      });
+
+      const vectorTotal = Math.max(vectorResults.length, 1);
+      vectorResults.forEach((repo, idx) => {
+        const distance =
+          typeof repo._distance === "number" ? repo._distance : Infinity;
+        const vectorSimilarity = Number.isFinite(distance)
+          ? 1 / (1 + Math.max(0, distance))
+          : 0;
+        const prev = vectorSimMap.get(repo.id) || 0;
+        if (vectorSimilarity > prev) vectorSimMap.set(repo.id, vectorSimilarity);
+
+        const rankQuality = 1 - idx / vectorTotal;
+        const weightedScore = 1.8 * (vectorSimilarity * 0.8 + rankQuality * 0.2);
+        upsertCandidate(repo, weightedScore);
+      });
+
+      const stage1Candidates = Array.from(candidateMap.values())
+        .sort((a, b) => {
+          if (b.stage1Score !== a.stage1Score) return b.stage1Score - a.stage1Score;
+          return a.firstSeen - b.firstSeen;
+        })
+        .slice(0, STAGE1_MAX_CANDIDATES);
+
+      const semanticQuery = [
+        originalQuery,
+        ...(rewrite?.keywords || []),
+        ...(rewrite?.must || []),
+      ].join(" ");
+      const queryEmbedding = await aiService.getEmbedding(semanticQuery);
+      const mustPhrases = (rewrite?.must || [])
+        .map((item) => normalizeText(item))
+        .filter(Boolean);
+
+      const stage2Candidates = stage1Candidates
+        .map((candidate) => {
+          const repo = candidate.repo;
+          const name = normalizeText(repo.name);
+          const full = normalizeText(repo.full_name || "");
+          const desc = normalizeText(repo.description || "");
+          const summary = normalizeText(repo.ai_summary || "");
+          const tagTopic = normalizeText(
+            `${(repo.ai_tags || []).join(" ")} ${(repo.topics || []).join(" ")}`
+          );
+          const readme = normalizeText((repo.readme_content || "").slice(0, 1200));
+
+          let titleScore = 0;
+          let hardPriority = 5;
+          if (name === originalQuery || full === originalQuery) {
+            hardPriority = 0;
+            titleScore += 1200;
+          } else if (
+            queryVariants.some((q) => q && (name === q || full === q))
+          ) {
+            hardPriority = 1;
+            titleScore += 1000;
+          } else if (
+            name.startsWith(originalQuery) ||
+            full.startsWith(originalQuery)
+          ) {
+            hardPriority = 2;
+            titleScore += 820;
+          } else if (
+            name.includes(originalQuery) ||
+            full.includes(originalQuery)
+          ) {
+            hardPriority = 3;
+            titleScore += 620;
+          } else if (
+            queryVariants.some((q) => q && (name.includes(q) || full.includes(q)))
+          ) {
+            hardPriority = 4;
+            titleScore += 420;
+          }
+
+          let titleTokenHits = 0;
+          let descTokenHits = 0;
+          let readmeTokenHits = 0;
+          let tagTokenHits = 0;
+          queryTokens.forEach((token) => {
+            if (name.includes(token) || full.includes(token)) titleTokenHits += 1.2;
+            if (desc.includes(token) || summary.includes(token)) descTokenHits += 0.9;
+            if (readme.includes(token)) readmeTokenHits += 0.6;
+            if (tagTopic.includes(token)) tagTokenHits += 1.0;
+          });
+
+          titleScore += Math.min(titleTokenHits, 12) * 28;
+
+          let descScore = 0;
+          if (desc.includes(originalQuery) || summary.includes(originalQuery))
+            descScore += 180;
+          descScore += Math.min(descTokenHits, 16) * 14;
+
+          let readmeScore = 0;
+          if (readme.includes(originalQuery)) readmeScore += 130;
+          readmeScore += Math.min(readmeTokenHits, 20) * 8;
+
+          mustPhrases.forEach((phrase) => {
+            if (!phrase) return;
+            if (name.includes(phrase) || full.includes(phrase)) {
+              titleScore += 70;
+              hardPriority = Math.min(hardPriority, 3);
+            }
+            else if (
+              tagTopic.includes(phrase) ||
+              summary.includes(phrase) ||
+              desc.includes(phrase)
+            ) {
+              descScore += 48;
+            } else if (readme.includes(phrase)) {
+              readmeScore += 35;
+            }
+          });
+
+          let codeScore = 0;
+          const vectorSimilarity = vectorSimMap.get(repo.id) || 0;
+          codeScore += vectorSimilarity * 220;
+          if (repo.embedding?.length) {
+            codeScore += Math.max(0, dotProduct(queryEmbedding, repo.embedding)) * 190;
+          }
+
+          const tagHits = (repo.ai_tags || []).reduce((acc, tag) => {
+            const normalizedTag = normalizeText(tag);
+            return queryTokens.some((token) => normalizedTag.includes(token))
+              ? acc + 1
+              : acc;
+          }, 0);
+          codeScore += Math.min(tagHits, 6) * 24;
+          codeScore += Math.min(tagTokenHits, 10) * 16;
+
+          const lexical = titleScore + descScore * 0.8 + readmeScore * 0.6;
+          const semantic = codeScore;
+          const blended =
+            candidate.stage1Score * 14 +
+            titleScore * 2.5 +
+            descScore * 1.2 +
+            readmeScore * 0.9 +
+            codeScore * 1.0;
+          return {
+            ...candidate,
+            hardPriority,
+            titleScore,
+            descScore,
+            readmeScore,
+            codeScore,
+            lexicalScore: lexical,
+            semanticScore: semantic,
+            blendedScore: blended,
+          };
+        })
+        .sort(compareCandidates)
+        .slice(0, STAGE2_TOP_K);
+
+      let finalCandidates = stage2Candidates;
+      if (useAiSearch && useAiRerank && stage2Candidates.length) {
         try {
-          const topCandidates = merged.slice(0, 50);
+          const topCandidates = stage2Candidates.slice(0, STAGE3_TOP_K);
           const ids = await aiService.rankRepositories(
-            query,
-            topCandidates.map((r) => ({
-              id: r.id,
-              name: r.name,
-              full_name: r.full_name,
-              description: r.description,
-              ai_summary: r.ai_summary,
-              ai_tags: r.ai_tags,
-            }))
+            rawQuery,
+            topCandidates.map((item) => ({
+              id: item.repo.id,
+              name: item.repo.name,
+              full_name: item.repo.full_name,
+              description: item.repo.description,
+              ai_summary: item.repo.ai_summary,
+              ai_tags: item.repo.ai_tags,
+            })),
+            STAGE3_TOP_K
           );
           if (ids.length) {
-            const map = new Map<number, Repository>();
-            topCandidates.forEach((r) => map.set(r.id, r));
-            merged = ids
+            const map = new Map<number, CandidateState>();
+            topCandidates.forEach((item) => map.set(item.repo.id, item));
+            const rankMap = new Map<number, number>();
+            ids.forEach((id, idx) => rankMap.set(id, idx));
+            const reranked = ids
               .map((id) => map.get(id))
-              .filter(Boolean) as Repository[];
+              .filter(Boolean)
+              .map((item) => ({
+                ...item,
+                aiRank: rankMap.get(item.repo.id) ?? item.aiRank,
+              })) as CandidateState[];
+
+            const rerankedIds = new Set(reranked.map((item) => item.repo.id));
+            const others = topCandidates.filter(
+              (item) => !rerankedIds.has(item.repo.id)
+            );
+            finalCandidates = [
+              ...reranked,
+              ...others,
+              ...stage2Candidates.slice(topCandidates.length),
+            ];
           }
         } catch (err) {
           console.error("AI rerank failed", err);
         }
       }
 
-      const ranked = merged.map((r, idx) => ({
-        repo: r,
-        score: rankRepo(r),
-        idx,
-      }));
-      ranked.sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return a.idx - b.idx;
+      finalCandidates = [...finalCandidates].sort(compareCandidates);
+      const explanation: Record<number, SearchExplainEntry> = {};
+      finalCandidates.forEach((item) => {
+        explanation[item.repo.id] = {
+          hardPriority: item.hardPriority,
+          titleScore: item.titleScore,
+          descScore: item.descScore,
+          readmeScore: item.readmeScore,
+          codeScore: item.codeScore,
+          stage1Score: item.stage1Score,
+          blendedScore: item.blendedScore,
+          aiRank:
+            item.aiRank === Number.MAX_SAFE_INTEGER ? null : item.aiRank + 1,
+        };
       });
 
-      const finalList = ranked.length ? ranked.map((r) => r.repo) : allReposList;
-      setAllRepos(finalList);
+      const finalList = finalCandidates.map((item, idx) => ({
+        ...item.repo,
+        score: finalCandidates.length - idx,
+      }));
+      setSearchExplainMap(explanation);
+      setAllRepos(finalList.length ? finalList : allReposSnapshot);
       setSelectedLanguage("all");
       setSelectedTag("all");
       setPage(1);
     } catch (error) {
+      console.error(error);
+      setSearchExplainMap({});
       toast.error("Search failed");
     } finally {
       setSearchLoading(false);
@@ -664,24 +992,21 @@ export default function Dashboard() {
         <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <div
-              className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] ${
-                isDark ? "text-emerald-300/80" : "text-muted-foreground"
-              }`}
+              className={`flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] ${isDark ? "text-emerald-300/80" : "text-muted-foreground"
+                }`}
             >
               <Sparkles className="w-4 h-4" />
               StarLens
             </div>
             <h2
-              className={`text-3xl font-semibold mt-1 ${
-                isDark ? "text-emerald-100" : "text-foreground"
-              }`}
+              className={`text-3xl font-semibold mt-1 ${isDark ? "text-emerald-100" : "text-foreground"
+                }`}
             >
               {t("hero.title")}
             </h2>
             <p
-              className={`mt-2 max-w-2xl ${
-                isDark ? "text-emerald-200/80" : "text-muted-foreground"
-              }`}
+              className={`mt-2 max-w-2xl ${isDark ? "text-emerald-200/80" : "text-muted-foreground"
+                }`}
             >
               {t("hero.subtitle")}
             </p>
@@ -695,9 +1020,8 @@ export default function Dashboard() {
                     ? lang === "zh"
                       ? "同步最新 Stars…"
                       : "Syncing latest stars…"
-                    : `${
-                        lang === "zh" ? "索引中" : "Indexing"
-                      } (${indexedDisplay}/${totalDisplay})`}
+                    : `${lang === "zh" ? "索引中" : "Indexing"
+                    } (${indexedDisplay}/${totalDisplay})`}
                 </div>
               )}
             </div>
@@ -711,14 +1035,13 @@ export default function Dashboard() {
               disabled={indexing || syncing}
             >
               {indexing
-                ? `${
-                    lang === "zh" ? "索引中" : "Indexing"
-                  } (${indexedDisplay}/${totalDisplay})`
+                ? `${lang === "zh" ? "索引中" : "Indexing"
+                } (${indexedDisplay}/${totalDisplay})`
                 : resumeJob
-                ? lang === "zh"
-                  ? "继续索引"
-                  : "Resume"
-                : t("btn.indexAll")}
+                  ? lang === "zh"
+                    ? "继续索引"
+                    : "Resume"
+                  : t("btn.indexAll")}
             </Button>
             <Button
               onClick={handleSync}
@@ -739,17 +1062,15 @@ export default function Dashboard() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
             <div className="relative w-full">
               <Search
-                className={`absolute left-3 top-3 h-4 w-4 ${
-                  isDark ? "text-emerald-400/80" : "text-muted-foreground"
-                }`}
+                className={`absolute left-3 top-3 h-4 w-4 ${isDark ? "text-emerald-400/80" : "text-muted-foreground"
+                  }`}
               />
               <Input
                 placeholder={t("search.placeholder")}
-                className={`pl-10 pr-44 h-11 rounded-md ${
-                  isDark
-                    ? "bg-[#050c07] border border-emerald-700/60 text-emerald-100 placeholder:text-emerald-300/50"
-                    : "bg-white border border-border text-foreground placeholder:text-muted-foreground"
-                }`}
+                className={`pl-10 pr-60 h-11 rounded-md ${isDark
+                  ? "bg-[#050c07] border border-emerald-700/60 text-emerald-100 placeholder:text-emerald-300/50"
+                  : "bg-white border border-border text-foreground placeholder:text-muted-foreground"
+                  }`}
                 value={searchQuery}
                 onChange={(e) => {
                   if (inputLocked) return;
@@ -765,9 +1086,8 @@ export default function Dashboard() {
               />
               <div className="absolute inset-y-1 right-1 flex items-center gap-2 pl-2">
                 <div
-                  className={`h-9 px-3 flex items-center  text-base ${
-                    isDark ? "text-emerald-200" : ""
-                  } ${searchLoading ? "animate-pulse" : ""}`}
+                  className={`h-9 px-3 flex items-center  text-base ${isDark ? "text-emerald-200" : ""
+                    } ${searchLoading ? "animate-pulse" : ""}`}
                 >
                   {searchLoading
                     ? lang === "zh"
@@ -776,19 +1096,17 @@ export default function Dashboard() {
                     : "↩︎"}
                 </div>
                 <div
-                  className={`h-9 px-3 flex items-center gap-1 rounded-md border transition-colors ${
-                    useAiSearch
-                      ? isDark
-                        ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
-                        : "border-primary bg-primary/10 text-primary"
-                      : isDark
+                  className={`h-9 px-3 flex items-center gap-1 rounded-md border transition-colors ${useAiSearch
+                    ? isDark
+                      ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
+                      : "border-primary bg-primary/10 text-primary"
+                    : isDark
                       ? "border-emerald-700/60 bg-[#0b1a11] text-emerald-300/80"
                       : "border-border bg-muted text-muted-foreground"
-                  } ${
-                    inputLocked
+                    } ${inputLocked
                       ? "opacity-60 cursor-not-allowed"
                       : "cursor-pointer"
-                  }`}
+                    }`}
                   onClick={() => !inputLocked && setUseAiSearch((v) => !v)}
                   title="AI 改写查询"
                 >
@@ -796,21 +1114,19 @@ export default function Dashboard() {
                   <span className="text-xs">{t("ai.rewrite")}</span>
                 </div>
                 <div
-                  className={`h-9 px-3 flex items-center gap-1 rounded-md border transition-colors ${
-                    useAiRerank && useAiSearch
-                      ? isDark
-                        ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
-                        : "border-primary bg-primary/10 text-primary"
-                      : isDark
+                  className={`h-9 px-3 flex items-center gap-1 rounded-md border transition-colors ${useAiRerank && useAiSearch
+                    ? isDark
+                      ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
+                      : "border-primary bg-primary/10 text-primary"
+                    : isDark
                       ? "border-emerald-700/60 bg-[#0b1a11] text-emerald-300/80"
                       : "border-border bg-muted text-muted-foreground"
-                  } ${
-                    useAiSearch
+                    } ${useAiSearch
                       ? inputLocked
                         ? "opacity-60 cursor-not-allowed"
                         : "cursor-pointer"
                       : "opacity-50 cursor-not-allowed"
-                  }`}
+                    }`}
                   onClick={() => {
                     if (!useAiSearch || inputLocked) return;
                     setUseAiRerank((v) => !v);
@@ -819,6 +1135,21 @@ export default function Dashboard() {
                 >
                   <ArrowUpWideNarrow className="w-4 h-4" />
                   <span className="text-xs">{t("ai.rerank")}</span>
+                </div>
+                <div
+                  className={`h-9 px-3 flex items-center gap-1 rounded-md border transition-colors ${showSearchExplain
+                    ? isDark
+                      ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
+                      : "border-primary bg-primary/10 text-primary"
+                    : isDark
+                      ? "border-emerald-700/60 bg-[#0b1a11] text-emerald-300/80"
+                      : "border-border bg-muted text-muted-foreground"
+                    } cursor-pointer`}
+                  onClick={() => setShowSearchExplain((v) => !v)}
+                  title="显示搜索排序解释"
+                >
+                  <Info className="w-4 h-4" />
+                  <span className="text-xs">解释</span>
                 </div>
               </div>
             </div>
@@ -829,27 +1160,25 @@ export default function Dashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className={`h-10 px-3 ${
-                      isDark
-                        ? "border border-emerald-600/40 text-emerald-100 bg-[#0b1a11]"
-                        : "border border-border text-foreground bg-white"
-                    }`}
+                    className={`h-10 px-3 ${isDark
+                      ? "border border-emerald-600/40 text-emerald-100 bg-[#0b1a11]"
+                      : "border border-border text-foreground bg-white"
+                      }`}
                   >
                     {t("sort.label")}：
                     {sortBy === "recent"
                       ? t("sort.latest")
                       : sortBy === "stars"
-                      ? t("sort.stars")
-                      : t("sort.indexed")}
+                        ? t("sort.stars")
+                        : t("sort.indexed")}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="end"
-                  className={`${
-                    isDark
-                      ? "bg-[#0b1a11] text-emerald-100 border-emerald-700/50"
-                      : "bg-white text-foreground border border-border shadow-sm"
-                  }`}
+                  className={`${isDark
+                    ? "bg-[#0b1a11] text-emerald-100 border-emerald-700/50"
+                    : "bg-white text-foreground border border-border shadow-sm"
+                    }`}
                 >
                   <DropdownMenuItem onClick={() => setSortBy("recent")}>
                     <Clock3 className="w-4 h-4 mr-2" /> {t("sort.latest")}
@@ -868,9 +1197,8 @@ export default function Dashboard() {
 
           <div className="flex flex-col gap-3">
             <div
-              className={`flex items-center gap-2 text-sm ${
-                isDark ? "text-emerald-300/80" : "text-muted-foreground"
-              }`}
+              className={`flex items-center gap-2 text-sm ${isDark ? "text-emerald-300/80" : "text-muted-foreground"
+                }`}
             >
               <SlidersHorizontal className="w-4 h-4" />
               {t("filters.quick")}
@@ -939,7 +1267,9 @@ export default function Dashboard() {
       </Card>
 
       <div className="grid gap-4 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {visibleRepos.map((repo) => (
+        {visibleRepos.map((repo) => {
+          const explain = searchExplainMap[repo.id];
+          return (
           <Card key={repo.id} className={repoCardClass}>
             <CardHeader className={repoHeaderClass}>
               <div className="flex justify-between items-start gap-2">
@@ -960,16 +1290,14 @@ export default function Dashboard() {
                   </a>
                 </CardTitle>
                 <div
-                  className={`flex items-center text-muted-foreground text-xs shrink-0 border px-1.5 py-0.5 rounded-full ${
-                    isDark ? "bg-background" : "bg-muted"
-                  }`}
+                  className={`flex items-center text-muted-foreground text-xs shrink-0 border px-1.5 py-0.5 rounded-full ${isDark ? "bg-background" : "bg-muted"
+                    }`}
                 >
                   <Star
-                    className={`w-3 h-3 mr-1 ${
-                      isDark
-                        ? "fill-current text-emerald-300"
-                        : "text-foreground"
-                    }`}
+                    className={`w-3 h-3 mr-1 ${isDark
+                      ? "fill-current text-emerald-300"
+                      : "text-foreground"
+                      }`}
                   />
                   <span
                     className={isDark ? "text-emerald-200" : "text-foreground"}
@@ -981,9 +1309,8 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent className="flex-1 flex flex-col gap-4 p-4">
               <CardDescription
-                className={`line-clamp-2 text-sm min-h-[2.5em] ${
-                  isDark ? "text-emerald-200/80" : "text-muted-foreground"
-                }`}
+                className={`line-clamp-2 text-sm min-h-[2.5em] ${isDark ? "text-emerald-200/80" : "text-muted-foreground"
+                  }`}
               >
                 {repo.description || "No description provided."}
               </CardDescription>
@@ -991,13 +1318,33 @@ export default function Dashboard() {
               {repo.ai_summary && (
                 <div className={aiSummaryClass}>
                   <span
-                    className={`font-semibold mr-1 ${
-                      isDark ? "text-emerald-300" : "text-foreground"
-                    }`}
+                    className={`font-semibold mr-1 ${isDark ? "text-emerald-300" : "text-foreground"
+                      }`}
                   >
                     AI:
                   </span>{" "}
                   {repo.ai_summary}
+                </div>
+              )}
+
+              {showSearchExplain && explain && (
+                <div
+                  className={`text-[11px] rounded-md px-2.5 py-2 border ${isDark
+                    ? "border-emerald-800/60 bg-[#07140d] text-emerald-200"
+                    : "border-border bg-muted/60 text-muted-foreground"
+                    }`}
+                >
+                  <div>
+                    P{explain.hardPriority} · T{Math.round(explain.titleScore)} · D
+                    {Math.round(explain.descScore)} · R
+                    {Math.round(explain.readmeScore)} · C
+                    {Math.round(explain.codeScore)}
+                  </div>
+                  <div>
+                    S1 {explain.stage1Score.toFixed(2)} · Blend{" "}
+                    {Math.round(explain.blendedScore)} · AI{" "}
+                    {explain.aiRank ? `#${explain.aiRank}` : "-"}
+                  </div>
                 </div>
               )}
 
@@ -1028,9 +1375,8 @@ export default function Dashboard() {
                     onClick={() => handleReindexOne(repo)}
                   >
                     <RotateCcw
-                      className={`w-3 h-3 mr-1 ${
-                        reindexingId === repo.id ? "animate-spin" : ""
-                      }`}
+                      className={`w-3 h-3 mr-1 ${reindexingId === repo.id ? "animate-spin" : ""
+                        }`}
                     />
                     重新索引
                   </Button>
@@ -1038,7 +1384,8 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
 
         {visibleRepos.length === 0 && !indexing && !syncing && (
           <div className="col-span-full flex flex-col items-center justify-center py-16 text-center border-2 border-dashed rounded-lg bg-muted/5">
